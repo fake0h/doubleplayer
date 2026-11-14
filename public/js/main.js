@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { WEAPONS, ARENA, FALL_MS, USES_PER_WEAPON, MAX_HEALTH } from '/shared/weapons.js';
+import { WEAPONS, ARENA, FALL_MS, USES_PER_WEAPON, MAX_HEALTH, usesOf } from '/shared/weapons.js';
 import { WireBody } from './body.js';
 import { buildWeaponMesh, animateWeaponMesh } from './weaponMeshes.js';
 
@@ -229,7 +229,9 @@ function applySnapshot(s) {
     if (!floorWeapons.has(w.id)) {
       const group = new THREE.Group();
       const mesh = buildWeaponMesh(w.type);
-      mesh.rotation.z = Math.PI / 2;            // lie flat-ish
+      const upright = ['heal', 'berserk'].includes(WEAPONS[w.type].kind);
+      mesh.rotation.z = upright ? 0 : Math.PI / 2;   // cakes and helmets sit upright, the rest lie flat
+      if (WEAPONS[w.type].kind === 'berserk') mesh.position.y = 0.05;
       mesh.position.y = 0;
       const holder = new THREE.Group();
       holder.add(mesh);
@@ -248,12 +250,43 @@ function applySnapshot(s) {
       group.position.set(w.x, ARENA.dropHeight, w.z);
       group.rotation.y = w.spin;
       scene.add(group);
-      floorWeapons.set(w.id, { group, holder, mesh, ring, beacon, spawnLocal: performance.now() - w.age, type: w.type, x: w.x, z: w.z, landed: w.age >= FALL_MS });
+      let special = null;
+      if (WEAPONS[w.type].special) {
+        // specials glow from across the room: bright tall beacon, light, orbiting sparkles, name tag
+        beacon.geometry.dispose();
+        beacon.geometry = new THREE.CylinderGeometry(0.25, 0.6, H, 12, 1, true);
+        beacon.position.y = H / 2;
+        const light = new THREE.PointLight(WEAPONS[w.type].color, 0, 14);
+        light.position.y = 1.2;
+        group.add(light);
+        const sparkles = new THREE.Group();
+        for (let i = 0; i < 10; i++) {
+          const sp = new THREE.Mesh(new THREE.OctahedronGeometry(0.07), new THREE.MeshBasicMaterial({ color: i % 2 ? 0xffffff : 0xffd000 }));
+          sp.userData.a = i / 10 * Math.PI * 2;
+          sp.userData.h = 0.3 + (i % 3) * 0.4;
+          sparkles.add(sp);
+        }
+        sparkles.position.set(w.x, 0, w.z);
+        sparkles.visible = false;
+        scene.add(sparkles);
+        const tag = document.createElement('div');
+        tag.className = 'label3d special';
+        tag.textContent = `★ ${WEAPONS[w.type].name} ★`;
+        tag.style.display = 'none';
+        ui.labels.appendChild(tag);
+        special = { light, sparkles, tag };
+        tone(880, 0.12, 'triangle', 0.08); setTimeout(() => tone(1320, 0.2, 'triangle', 0.08), 120);
+      }
+      floorWeapons.set(w.id, { special, group, holder, mesh, ring, beacon, spawnLocal: performance.now() - w.age, type: w.type, x: w.x, z: w.z, landed: w.age >= FALL_MS });
       ring.position.x = w.x; ring.position.z = w.z;
     }
   }
   for (const [id, fw] of floorWeapons) {
-    if (!wSeen.has(id)) { scene.remove(fw.group); scene.remove(fw.ring); scene.remove(fw.beacon); floorWeapons.delete(id); }
+    if (!wSeen.has(id)) {
+      scene.remove(fw.group); scene.remove(fw.ring); scene.remove(fw.beacon);
+      if (fw.special) { scene.remove(fw.special.sparkles); fw.special.tag.remove(); }
+      floorWeapons.delete(id);
+    }
   }
 
   // countdown numbers
@@ -351,6 +384,8 @@ function updateFx(dt) {
 
 function playAttackSound(type) {
   const k = WEAPONS[type].kind;
+  if (type === 'poop_bazooka') { for (let i = 0; i < 10; i++) setTimeout(() => tone(120 + Math.random() * 60, 0.06, 'square', 0.07, -60), i * 90); return; }
+  if (type === 'dragon_sword') { tone(90, 0.5, 'sawtooth', 0.12, -40); noise(0.3, 0.12); return; }
   if (type === 'chainsaw') { tone(90, 0.45, 'sawtooth', 0.12, 40); return; }
   if (type === 'pool_noodle' || type === 'rubber_chicken') { tone(700, 0.2, 'triangle', 0.1, -400); return; }
   if (k === 'spray') { noise(0.35, type === 'flamethrower' ? 0.2 : 0.06); return; }
@@ -414,7 +449,19 @@ function connect() {
         if (m.id === me.id) feed(`Your ${WEAPONS[m.weapon].name} broke!`, '#ff8c2a');
         tone(150, 0.15, 'sawtooth', 0.06, -80);
         break;
-      case 'fx': onAttackFx(m); break;
+      case 'fx':
+        if (m.kind === 'homing') onHomingFx(m);
+        else if (m.kind === 'berserk') onBerserkFx(m);
+        else if (m.kind === 'punch') onPunchFx(m);
+        else onAttackFx(m);
+        break;
+      case 'heal': onHeal(m); break;
+      case 'teleport':
+        // berserk launch: fly to the enemy, controls locked during the flurry
+        me.dash = { from: me.pos.clone(), to: new THREE.Vector3(...m.p), start: performance.now(), ms: m.launchMs };
+        me.yaw = m.yaw;
+        me.lockUntil = performance.now() + m.lockMs;
+        break;
       case 'hit': onHit(m); break;
     }
   };
@@ -439,7 +486,9 @@ function onAttackFx(m) {
   }
   const impact = m.impact ? new THREE.Vector3(...m.impact) : null;
   const len = impact ? origin.distanceTo(impact) : def.range;
-  if (def.kind === 'ranged') {
+  if (def.kind === 'poopgun') {
+    poopStream(origin, dir, Math.min(len, def.range));
+  } else if (def.kind === 'ranged') {
     if (m.weapon === 'rocket_launcher') {
       const rocket = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.4, 8), new THREE.MeshBasicMaterial({ color: 0xff3020 }));
       rocket.position.copy(origin);
@@ -461,6 +510,132 @@ function onAttackFx(m) {
   }
 }
 
+// ---------- special weapon effects ----------
+let poopTex = null;
+function getPoopTex() {
+  if (poopTex) return poopTex;
+  // hand-drawn poop emoji so it looks the same on every device
+  const c = document.createElement('canvas');
+  c.width = c.height = 128;
+  const g = c.getContext('2d');
+  const blob = (x, y, rx, ry) => { g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI * 2); g.fill(); g.stroke(); };
+  g.lineWidth = 4; g.strokeStyle = '#3d2210';
+  const grad = g.createLinearGradient(0, 20, 0, 120);
+  grad.addColorStop(0, '#b0743a'); grad.addColorStop(1, '#6b3d18');
+  g.fillStyle = grad;
+  blob(64, 98, 50, 20);
+  blob(64, 72, 38, 17);
+  blob(64, 50, 25, 14);
+  g.beginPath(); g.moveTo(52, 42); g.quadraticCurveTo(66, 10, 74, 18); g.quadraticCurveTo(70, 34, 76, 44); g.closePath(); g.fill(); g.stroke();
+  g.fillStyle = '#fff';
+  g.beginPath(); g.ellipse(50, 74, 9, 11, 0, 0, Math.PI * 2); g.ellipse(78, 74, 9, 11, 0, 0, Math.PI * 2); g.fill();
+  g.fillStyle = '#111';
+  g.beginPath(); g.arc(52, 76, 5, 0, Math.PI * 2); g.arc(80, 76, 5, 0, Math.PI * 2); g.fill();
+  g.strokeStyle = '#2a1608'; g.lineWidth = 4;
+  g.beginPath(); g.arc(64, 92, 14, 0.15 * Math.PI, 0.85 * Math.PI); g.stroke();
+  poopTex = new THREE.CanvasTexture(c);
+  poopTex.colorSpace = THREE.SRGBColorSpace;
+  return poopTex;
+}
+function poopStream(origin, dir, len) {
+  const tex = getPoopTex();
+  const speed = 30;
+  for (let i = 0; i < 40; i++) {
+    const spr = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+    spr.scale.setScalar(0.55 + Math.random() * 0.25);
+    spr.position.copy(origin);
+    const d = dir.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.12, (Math.random() - 0.5) * 0.08, (Math.random() - 0.5) * 0.12)).normalize();
+    const life = Math.max(0.15, len / speed);
+    scene.add(spr);
+    fx.push({ obj: spr, vel: d.multiplyScalar(speed), life, max: life * 3, fade: true, delay: i * 0.025 });
+  }
+}
+
+const homing = [];
+function onHomingFx(m) {
+  const a = avatars.get(m.from);
+  if (a) a.body.swing('ranged');
+  const spear = buildWeaponMesh('fire_spear');
+  spear.scale.setScalar(1.6);
+  const holder = new THREE.Group();
+  holder.add(spear);
+  scene.add(holder);
+  const origin = new THREE.Vector3(...m.origin);
+  const side = new THREE.Vector3((Math.random() - 0.5) * 16, 0, (Math.random() - 0.5) * 16);
+  homing.push({ holder, spear, origin, side, to: m.to, start: performance.now(), ms: m.travelMs, last: origin.clone() });
+  tone(200, 0.6, 'sawtooth', 0.1, 600);
+  feed(`${a?.data.name ?? '?'} threw the fake0h Fire Spear!`, '#ff8c2a');
+  if (m.to === me.id) banner('🔥 A FIRE SPEAR IS HUNTING YOU! 🔥', 1800);
+}
+function updateHoming() {
+  const now = performance.now();
+  for (let i = homing.length - 1; i >= 0; i--) {
+    const h = homing[i];
+    const t = Math.min(1, (now - h.start) / h.ms);
+    const target = avatars.get(h.to);
+    const end = target ? target.body.root.position.clone().add(new THREE.Vector3(0, 1.1, 0)) : h.last.clone();
+    // curved path that bends toward the target wherever it runs
+    const ctrl = h.origin.clone().lerp(end, 0.5).add(h.side).add(new THREE.Vector3(0, 7, 0));
+    const p = new THREE.Vector3()
+      .addScaledVector(h.origin, (1 - t) * (1 - t))
+      .addScaledVector(ctrl, 2 * (1 - t) * t)
+      .addScaledVector(end, t * t);
+    const dirv = p.clone().sub(h.last);
+    if (dirv.lengthSq() > 1e-6) h.holder.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dirv.normalize());
+    h.holder.position.copy(p);
+    addBurst(p, Math.random() < 0.5 ? 0xff5a00 : 0xffd000, 2, 1.5, 0.12, 0.35);
+    h.last.copy(p);
+    if (t >= 1) {
+      addExplosion(end);
+      scene.remove(h.holder);
+      homing.splice(i, 1);
+    }
+  }
+}
+
+function onBerserkFx(m) {
+  const start = new THREE.Vector3(...m.start).add(new THREE.Vector3(0, 1, 0));
+  const end = new THREE.Vector3(...m.end).add(new THREE.Vector3(0, 1, 0));
+  // red streak along the launch path
+  for (let i = 0; i < 5; i++) {
+    const off = new THREE.Vector3((Math.random() - 0.5) * 0.4, (Math.random() - 0.5) * 0.6, (Math.random() - 0.5) * 0.4);
+    const geo = new THREE.BufferGeometry().setFromPoints([start.clone().add(off), end.clone().add(off)]);
+    const line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: i % 2 ? 0xff2020 : 0xffa000, transparent: true }));
+    scene.add(line);
+    fx.push({ obj: line, life: 0.6, max: 0.6, fade: true });
+  }
+  setTimeout(() => addBurst(end, 0xff2020, 20, 6, 0.1, 0.5), m.launchMs);
+  tone(70, 0.5, 'sawtooth', 0.15, 200);
+  const a = avatars.get(m.from);
+  feed(`${a?.data.name ?? '?'} went BERZERK!`, '#ff4040');
+}
+function onPunchFx(m) {
+  const a = avatars.get(m.from);
+  const target = avatars.get(m.to);
+  if (a) a.body.punch(m.n);
+  if (target) addBurst(target.body.root.position.clone().add(new THREE.Vector3(0, 1.3, 0)), 0xffffff, 5, 3, 0.06, 0.25);
+  tone(140 + (m.n % 3) * 30, 0.06, 'square', 0.1, -80);
+}
+function onHeal(m) {
+  const a = avatars.get(m.id);
+  if (a) {
+    const pos = a.body.root.position.clone();
+    for (let i = 0; i < 4; i++) setTimeout(() => addBurst(pos.clone().add(new THREE.Vector3(0, 0.5 + i * 0.4, 0)), i % 2 ? 0x4cff6a : 0xff9ad5, 12, 3, 0.08, 0.8), i * 120);
+    const el = document.createElement('div');
+    el.className = 'dmg';
+    el.style.color = '#4cff6a';
+    el.textContent = '+FULL HEALTH 🎂';
+    const v = pos.clone().add(new THREE.Vector3(0, 2.1, 0)).project(camera);
+    el.style.left = `${(v.x * 0.5 + 0.5) * innerWidth}px`;
+    el.style.top = `${(-v.y * 0.5 + 0.5) * innerHeight}px`;
+    document.getElementById('hud').appendChild(el);
+    requestAnimationFrame(() => { el.style.transform = 'translate(-50%, -180%)'; el.style.opacity = 0; });
+    setTimeout(() => el.remove(), 1000);
+  }
+  [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.15, 'triangle', 0.1), i * 100));
+  feed(`${a?.data.name ?? '?'} ate the Birthday Cake and restored all health!`, '#4cff6a');
+}
+
 let hitMarkerT = 0;
 function onHit(m) {
   const target = avatars.get(m.target);
@@ -470,7 +645,7 @@ function onHit(m) {
     const p = target.body.root.position.clone().add(new THREE.Vector3(0, 1.9, 0));
     damageNumber(p, m.dmg);
     addBurst(target.body.root.position.clone().add(new THREE.Vector3(0, 1.2, 0)),
-      m.weapon === 'water_pistol' ? 0x4fc3ff : m.weapon === 'pool_noodle' ? 0xff4fd8 : 0xff2020, 8 + Math.min(20, m.dmg / 2), 4);
+      m.weapon === 'water_pistol' ? 0x4fc3ff : m.weapon === 'pool_noodle' ? 0xff4fd8 : m.weapon === 'poop_bazooka' ? 0x7a4a1a : 0xff2020, 8 + Math.min(20, m.dmg / 2), 4);
   }
   if (m.target === me.id) {
     ui.vignette.style.boxShadow = `inset 0 0 ${120 + m.dmg * 3}px rgba(255,0,0,${Math.min(0.85, 0.25 + m.dmg / 60)})`;
@@ -479,6 +654,7 @@ function onHit(m) {
     tone(110, 0.2, 'sawtooth', 0.12, -60);
   }
   if (m.from === me.id) { hitMarkerT = 0.25; tone(1200, 0.05, 'square', 0.06); }
+  if (m.weapon === 'berserk_helmet' || m.weapon === 'poop_bazooka') return; // multi-hit attacks: skip feed spam
   feed(`${avatars.get(m.from)?.data.name ?? '?'} hit ${target?.data.name ?? '?'} with ${def.name} for ${m.dmg}`,
     m.from === me.id ? '#7dff3d' : m.target === me.id ? '#ff6060' : '#c8d8ff');
 }
@@ -642,13 +818,20 @@ function updateLocal(dt) {
   const fwd = new THREE.Vector3(-Math.sin(me.yaw), 0, -Math.cos(me.yaw));
   const right = new THREE.Vector3(Math.cos(me.yaw), 0, -Math.sin(me.yaw));
   const move = new THREE.Vector3();
+  const lockedOut = me.lockUntil && performance.now() < me.lockUntil;
+  if (me.dash) {
+    const k = Math.min(1, (performance.now() - me.dash.start) / me.dash.ms);
+    me.pos.lerpVectors(me.dash.from, me.dash.to, k);
+    me.pos.y = Math.sin(k * Math.PI) * 2.5; // flying leap
+    if (k >= 1) { me.dash = null; me.pos.y = 0; }
+  }
   let sprint = keys.ShiftLeft || keys.ShiftRight;
-  if (touch.active && started && !downed && (touch.move.x || touch.move.y)) {
+  if (touch.active && started && !downed && !lockedOut && (touch.move.x || touch.move.y)) {
     // analog stick: up on the stick = forward; push all the way to run
     move.addScaledVector(fwd, -touch.move.y).addScaledVector(right, touch.move.x);
     if (Math.hypot(touch.move.x, touch.move.y) > 0.92) sprint = true;
   }
-  if (locked && !downed) {
+  if (locked && !downed && !lockedOut) {
     if (keys.KeyW || keys.ArrowUp) move.add(fwd);
     if (keys.KeyS || keys.ArrowDown) move.sub(fwd);
     if (keys.KeyD || keys.ArrowRight) move.add(right);
@@ -664,8 +847,10 @@ function updateLocal(dt) {
   if (((locked && keys.Space) || touch.jump) && me.onGround && !downed) { me.velY = 8; me.onGround = false; }
   touch.jump = false;
   if (touch.attackHeld) attack(); // hold ATTACK to keep swinging/firing
-  me.velY -= 22 * dt;
-  me.pos.y += me.velY * dt;
+  if (!me.dash) {
+    me.velY -= 22 * dt;
+    me.pos.y += me.velY * dt;
+  }
   if (me.pos.y <= 0) { me.pos.y = 0; me.velY = 0; me.onGround = true; }
   const lim = HALF - 0.6;
   me.pos.x = THREE.MathUtils.clamp(me.pos.x, -lim, lim);
@@ -710,11 +895,30 @@ function updateWeapons(dt, t) {
       addBurst(new THREE.Vector3(fw.x, 0.2, fw.z), WEAPONS[fw.type].color, 10, 3, 0.06, 0.4);
       if (Math.hypot(fw.x - me.pos.x, fw.z - me.pos.z) < 25) tone(180, 0.08, 'triangle', 0.05);
     }
-    fw.holder.rotation.x = landed ? 0 : age * 6;
+    fw.holder.rotation.x = landed || fw.special && ['heal', 'berserk'].includes(WEAPONS[fw.type].kind) ? 0 : age * 6;
     fw.group.rotation.y += dt * (landed ? 0.8 : 3);
     fw.group.position.y += landed ? Math.sin(t * 3 + id) * 0.08 + 0.1 : 0;
     fw.ring.material.opacity = landed ? (near && near.id === id ? 0.9 : 0.35) : 0;
     fw.beacon.material.opacity = landed ? 0.18 + Math.sin(t * 4 + id) * 0.06 : 0;
+    if (fw.special) {
+      const sp = fw.special;
+      fw.beacon.material.opacity = 0.3 + Math.sin(t * 5) * 0.12;   // visible while falling too
+      sp.light.intensity = 8 + Math.sin(t * 6) * 4;
+      fw.holder.scale.setScalar(2.2 + Math.sin(t * 3) * 0.1);
+      sp.sparkles.visible = landed;
+      sp.sparkles.children.forEach((c, i) => {
+        const a = c.userData.a + t * 1.5;
+        c.position.set(Math.cos(a) * 0.9, c.userData.h + Math.sin(t * 3 + i) * 0.15, Math.sin(a) * 0.9);
+        c.rotation.y = t * 4;
+      });
+      const v = fw.group.position.clone().add(new THREE.Vector3(0, 1.4, 0)).project(camera);
+      const show = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1;
+      sp.tag.style.display = show ? 'block' : 'none';
+      if (show) {
+        sp.tag.style.left = `${(v.x * 0.5 + 0.5) * innerWidth}px`;
+        sp.tag.style.top = `${(-v.y * 0.5 + 0.5) * innerHeight}px`;
+      }
+    }
     animateWeaponMesh(fw.mesh, t);
   }
   for (const a of avatars.values()) if (a.body.held) animateWeaponMesh(a.body.held, t);
@@ -722,7 +926,7 @@ function updateWeapons(dt, t) {
   // pickup prompt
   if (near && isFighter() && !me.weapon && snap.phase === 'fight' && me.hp > 0) {
     const d = WEAPONS[near.type];
-    ui.prompt.innerHTML = `${touch.active ? 'Tap <b>GRAB</b>' : 'Press <b>E</b>'} to pick up <b style="color:${hex(d.color)}">${d.name}</b> · ${d.damage} dmg`;
+    ui.prompt.innerHTML = `${touch.active ? 'Tap <b>GRAB</b>' : 'Press <b>E</b>'} to pick up <b style="color:${hex(d.color)}">${d.special ? '★ ' : ''}${d.name}</b> · ${d.special ? d.desc : d.damage + ' dmg'}`;
     ui.prompt.style.display = 'block';
     buttons.btnGrab.classList.add('ready');
   } else { ui.prompt.style.display = 'none'; buttons.btnGrab.classList.remove('ready'); }
@@ -773,16 +977,17 @@ function updateHud() {
   ui.hpBar.style.background = hpColor(me.hp);
   if (me.weapon) {
     const d = WEAPONS[me.weapon];
-    ui.wName.textContent = d.name;
+    ui.wName.textContent = (d.special ? '★ ' : '') + d.name;
     ui.wName.style.color = hex(d.color);
     const cd = Math.max(0, d.cooldown - (performance.now() - me.lastAttack));
-    ui.wInfo.textContent = `${d.damage} damage · ${d.kind} · range ${d.range}m${cd > 0 ? ' · reloading' : ''}`;
+    ui.wInfo.textContent = d.special ? `${d.desc}${cd > 0 ? ' · recharging' : ''}`
+      : `${d.damage} damage · ${d.kind} · range ${d.range}m${cd > 0 ? ' · reloading' : ''}`;
   } else {
     ui.wName.textContent = 'Bare hands';
     ui.wName.style.color = '#e8f6ff';
     ui.wInfo.textContent = snap.phase === 'fight' && isFighter() ? (touch.active ? 'Walk to a weapon and tap GRAB' : 'Grab a weapon from the floor (E)') : 'Weapons drop when the fight starts';
   }
-  ui.pips.innerHTML = Array.from({ length: USES_PER_WEAPON }, (_, i) => `<div class="pip ${i < me.uses ? 'on' : ''}"></div>`).join('');
+  ui.pips.innerHTML = Array.from({ length: me.weapon ? usesOf(me.weapon) : USES_PER_WEAPON }, (_, i) => `<div class="pip ${i < me.uses ? 'on' : ''}"></div>`).join('');
 
   // status line
   const occupied = snap.pads.filter(Boolean).length;
@@ -839,6 +1044,7 @@ function frame() {
   updateWeapons(dt, clock.t);
   updatePads(dt, clock.t);
   updateFx(dt);
+  updateHoming();
   updateCamera(dt);
   updateHud();
   renderer.render(scene, camera);

@@ -45,6 +45,18 @@ Everyone who opens the site appears as a glowing wireframe body in a big neon ro
 | Sniper Rifle | 55 | ranged |
 | Rocket Launcher | 60 | ranged + splash |
 
+### ★ Special weapons
+
+Rare drops that glow from across the room: a tall colored light beam, sparkles, and a gold name tag. Their drop chance grows as the match goes on, and at most 2 are on the floor at once.
+
+| Special | Power | Uses |
+|---|---|---|
+| Berzerk Helmet | You wear it. Attack to launch at your enemy from up to 45m away, then punch like crazy for 20 damage | 3 |
+| Poop Bazooka | Machine-guns dozens of poop emojis for 25 damage | 3 |
+| Dragon Sword | A blade coming out of a dragon's jaws. 50 damage | 3 |
+| fake0h Fire Spear | A guided missile. Throw it from anywhere: it hunts your opponent down and always kills | 1 |
+| Birthday Cake | Eat it to restore all your health | 1 |
+
 Silly weapons drop often and deadly ones are rare. To change damage, range, cooldown, or how often a weapon drops, edit `shared/weapons.js`.
 
 ## Controls

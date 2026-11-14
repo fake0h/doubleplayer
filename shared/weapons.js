@@ -36,6 +36,18 @@ export const WEAPONS = {
   chainsaw:        { name: 'Chainsaw',         kind: 'melee',  damage: 45, range: 2.6, cone: 60, cooldown: 1100, color: 0xffa600, rarity: 1 },
   sniper_rifle:    { name: 'Sniper Rifle',     kind: 'ranged', damage: 55, range: 90,  cone: 2,  cooldown: 2000, color: 0x2e4a2e, rarity: 1 },
   rocket_launcher: { name: 'Rocket Launcher',  kind: 'ranged', damage: 60, range: 60,  cone: 5,  cooldown: 2200, color: 0x3a5f2a, rarity: 1, splash: 4 },
+
+  // ---- SPECIAL weapons: rare, glow from across the room, have special powers ----
+  berserk_helmet: { name: 'Berzerk Helmet',    kind: 'berserk', damage: 20, range: 45, cone: 360, cooldown: 2500, color: 0xff2020, special: true, uses: 3,
+                    desc: 'Wear it. Attack to launch at your enemy and punch like crazy (20 dmg)' },
+  poop_bazooka:   { name: 'Poop Bazooka',      kind: 'poopgun', damage: 25, range: 35, cone: 12,  cooldown: 1800, color: 0x8b5a2b, special: true, uses: 3,
+                    desc: 'Machine-guns dozens of poops (25 dmg)' },
+  dragon_sword:   { name: 'Dragon Sword',      kind: 'melee',   damage: 50, range: 3.4, cone: 65, cooldown: 1000, color: 0x22e070, special: true, uses: 3,
+                    desc: 'A blade from a dragon\'s jaws (50 dmg)' },
+  fire_spear:     { name: 'fake0h Fire Spear', kind: 'homing',  damage: 999, range: 999, cone: 360, cooldown: 1000, color: 0xff6a00, special: true, uses: 1,
+                    desc: 'Guided missile. Throw from anywhere — it always finds and kills' },
+  birthday_cake:  { name: 'Birthday Cake',     kind: 'heal',    damage: 0,  range: 0,  cone: 0,   cooldown: 500,  color: 0xffb6e1, special: true, uses: 1,
+                    desc: 'Eat it to restore all your health' },
 };
 
 // ---- Hit area tuning ----
@@ -48,6 +60,7 @@ export const HIT_TUNING = {
   bodyRadius: 0.75,   // how "wide" a player's body counts as for hits (meters)
 };
 for (const w of Object.values(WEAPONS)) {
+  if (w.special && w.kind !== 'melee') continue;  // special powers aren't cone-based
   if (w.kind === 'melee') {
     w.range = +(w.range * HIT_TUNING.meleeRange).toFixed(1);
     w.cone = Math.min(150, Math.round(w.cone * HIT_TUNING.meleeCone));
@@ -58,16 +71,22 @@ for (const w of Object.values(WEAPONS)) {
 }
 
 export const WEAPON_IDS = Object.keys(WEAPONS);
+export const NORMAL_IDS = WEAPON_IDS.filter(id => !WEAPONS[id].special);
+export const SPECIAL_IDS = WEAPON_IDS.filter(id => WEAPONS[id].special);
+export const usesOf = (type) => WEAPONS[type].uses ?? USES_PER_WEAPON;
 
-// Weighted random pick: rarity 3 = common, 1 = rare.
+// Weighted random pick of a normal weapon: rarity 3 = common, 1 = rare.
 export function randomWeaponType(rng = Math.random) {
-  const total = WEAPON_IDS.reduce((s, id) => s + WEAPONS[id].rarity, 0);
+  const total = NORMAL_IDS.reduce((s, id) => s + WEAPONS[id].rarity, 0);
   let r = rng() * total;
-  for (const id of WEAPON_IDS) {
+  for (const id of NORMAL_IDS) {
     r -= WEAPONS[id].rarity;
     if (r <= 0) return id;
   }
-  return WEAPON_IDS[0];
+  return NORMAL_IDS[0];
+}
+export function randomSpecialType(rng = Math.random) {
+  return SPECIAL_IDS[Math.floor(rng() * SPECIAL_IDS.length)];
 }
 
 // Arena layout (shared so client and server agree)

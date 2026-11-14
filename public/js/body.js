@@ -198,10 +198,21 @@ export class WireBody {
   }
 
   setWeapon(mesh, kind) {
-    if (this.held) this.armR.hand.remove(this.held);
+    if (this.held) this.held.parent?.remove(this.held);
     this.held = mesh;
     this.heldKind = kind;
-    if (mesh) {
+    if (!mesh) return;
+    if (kind === 'berserk') {
+      // the helmet is worn, not held
+      mesh.position.set(0, 0.06, 0);
+      mesh.scale.setScalar(1.05);
+      this.head.add(mesh);
+    } else if (kind === 'heal') {
+      // cake carried upright on the palm
+      mesh.rotation.set(Math.PI, 0, 0);
+      mesh.position.set(0, -0.05, 0);
+      this.armR.hand.add(mesh);
+    } else {
       // weapon models point along +Y; melee blades stick forward out of the fist,
       // guns continue along the arm.
       mesh.rotation.set(kind === 'melee' ? -Math.PI / 2 : Math.PI, 0, 0);
@@ -209,7 +220,12 @@ export class WireBody {
     }
   }
 
+  get aiming() {
+    return this.held && ['ranged', 'spray', 'poopgun', 'homing'].includes(this.heldKind);
+  }
+
   swing(kind) { this.attackT = 1; this.attackKind = kind; }
+  punch(n) { this.punchT = 1; this.punchSide = n % 2; }
   flash() { this.flashT = 1; }
 
   update(dt, moving, pitch = 0, downed = false) {
@@ -231,7 +247,11 @@ export class WireBody {
 
     // right arm: aims when holding a ranged weapon, otherwise swings
     const armR = this.armR;
-    if (this.held && this.heldKind !== 'melee') {
+    if (this.heldKind === 'heal' && this.held) {
+      // hold the cake out in front
+      armR.shoulder.rotation.set(1.1, 0, 0);
+      armR.elbow.rotation.x = -1.1;
+    } else if (this.aiming) {
       armR.shoulder.rotation.set(Math.PI / 2 + pitch, 0, 0);
       armR.elbow.rotation.x = 0;
       if (this.attackT > 0) armR.shoulder.rotation.x += this.attackT * 0.35; // recoil
@@ -242,10 +262,21 @@ export class WireBody {
       armR.shoulder.rotation.set(ang, 0, -0.2);
       armR.elbow.rotation.x = -0.3;
     } else {
-      armR.shoulder.rotation.set(this.held ? 0.5 + s * 0.3 : s * 0.8, 0, 0);
-      armR.elbow.rotation.x = this.held ? -0.6 : -0.25;
+      const inHand = this.held && this.heldKind !== 'berserk';
+      armR.shoulder.rotation.set(inHand ? 0.5 + s * 0.3 : s * 0.8, 0, 0);
+      armR.elbow.rotation.x = inHand ? -0.6 : -0.25;
     }
     this.attackT = Math.max(0, this.attackT - dt * 3.2);
+    // berserk punches: jab straight forward with alternating fists
+    if (this.punchT > 0) {
+      const arm = this.punchSide ? this.armL : this.armR;
+      const jab = Math.sin(this.punchT * Math.PI);
+      arm.shoulder.rotation.set(Math.PI / 2 * jab + 0.2, 0, 0);
+      arm.elbow.rotation.x = -1.2 * (1 - jab);
+      this.spine.rotation.y = (this.punchSide ? 0.25 : -0.25) * jab;
+      this.punchT = Math.max(0, this.punchT - dt * 8);
+      if (this.punchT === 0) this.spine.rotation.y = 0;
+    }
 
     // knocked out: lie down
     const targetRot = downed ? -Math.PI / 2 : 0;

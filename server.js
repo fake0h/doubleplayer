@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
   WEAPONS, USES_PER_WEAPON, MAX_HEALTH, ARENA, FALL_MS, randomWeaponType, HIT_TUNING,
+  randomSpecialType, usesOf,
 } from './shared/weapons.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -79,6 +80,7 @@ function makePlayer(ws) {
     weapon: null,      // { type, uses }
     lastAttack: 0,
     lastHitAt: 0,
+    lockUntil: 0,      // berserk lunge: server owns position until this time
   };
 }
 
@@ -104,7 +106,14 @@ function broadcast(msg) {
 }
 function announce(text, ms = 2500) { broadcast({ t: 'msg', text, ms }); }
 
-function spawnWeapon() {
+// Special weapons are rare: a small chance per drop that grows as the match goes on,
+// and at most 2 lying around at once.
+function specialChance() {
+  if (game.phase !== 'fight') return 0;
+  const elapsed = (now() - game.fightStartedAt) / 1000;
+  return Math.min(0.14, 0.04 + elapsed / 900);
+}
+function spawnWeapon(forceType) {
   const id = nextWeaponId++;
   // avoid spawning directly on the pads
   let x, z;
@@ -112,7 +121,11 @@ function spawnWeapon() {
     x = (Math.random() * 2 - 1) * (HALF - 3);
     z = (Math.random() * 2 - 1) * (HALF - 3);
   } while (ARENA.pads.some(p => Math.hypot(x - p.x, z - p.z) < 3));
-  weapons.set(id, { id, type: randomWeaponType(), x, z, spin: Math.random() * Math.PI * 2, spawnAt: now() });
+  const specialsOut = [...weapons.values()].filter(w => WEAPONS[w.type].special).length;
+  let type = forceType;
+  if (!type) type = (specialsOut < 2 && Math.random() < specialChance()) ? randomSpecialType() : randomWeaponType();
+  weapons.set(id, { id, type, x, z, spin: Math.random() * Math.PI * 2, spawnAt: now() });
+  if (WEAPONS[type].special) announce(`★ A SPECIAL weapon is falling: ${WEAPONS[type].name}!`, 3000);
 }
 
 function resetToLobby() {
@@ -223,6 +236,7 @@ function handleAttack(pl, msg) {
   const origin = [pl.p[0], pl.p[1] + 1.45, pl.p[2]];
   const opponentId = game.fighters.find(id => id !== pl.id);
   const opp = players.get(opponentId);
+  if (def.special && def.kind !== 'melee') return specialAttack(pl, opp, def, origin, dir);
   let hitId = null;
   let impact = null;
 
@@ -272,6 +286,84 @@ function handleAttack(pl, msg) {
   finishUse(pl);
 }
 
+// ---------- special powers ----------
+const stillFighting = (a, b) => game.phase === 'fight' && a && b && players.has(a.id) && players.has(b.id) && b.hp > 0;
+
+function specialAttack(pl, opp, def, origin, dir) {
+  const type = pl.weapon.type;
+  const use = () => { pl.weapon.uses -= 1; finishUse(pl); };
+
+  if (def.kind === 'heal') {
+    // Birthday Cake: restore all health
+    pl.hp = MAX_HEALTH;
+    broadcast({ t: 'heal', id: pl.id, hp: pl.hp, weapon: type });
+    return use();
+  }
+
+  if (!opp || opp.hp <= 0) return;
+
+  if (def.kind === 'homing') {
+    // fake0h Fire Spear: guided missile that always finds and kills the opponent
+    const dist = Math.hypot(opp.p[0] - pl.p[0], opp.p[1] - pl.p[1], opp.p[2] - pl.p[2]);
+    const travelMs = Math.round(Math.min(3000, 700 + dist * 40));
+    broadcast({ t: 'fx', kind: 'homing', from: pl.id, to: opp.id, weapon: type, origin, travelMs });
+    setTimeout(() => {
+      if (stillFighting(pl, opp)) damage(opp, opp.hp, pl, type);
+    }, travelMs);
+    return use();
+  }
+
+  if (def.kind === 'berserk') {
+    // Berzerk Helmet: launch at the enemy, then a flurry of punches (20 total)
+    const dx = pl.p[0] - opp.p[0], dz = pl.p[2] - opp.p[2];
+    const d = Math.hypot(dx, dz);
+    if (d > def.range) { send(pl.ws, { t: 'msg', text: 'Too far away to berserk!', ms: 1500 }); return; }
+    const ux = d > 0.01 ? dx / d : 0, uz = d > 0.01 ? dz / d : 1;
+    const start = [...pl.p];
+    const end = [
+      Math.max(-HALF, Math.min(HALF, opp.p[0] + ux * 0.9)),
+      0,
+      Math.max(-HALF, Math.min(HALF, opp.p[2] + uz * 0.9)),
+    ];
+    const LAUNCH_MS = 350, PUNCHES = 8, PUNCH_GAP = 120;
+    const yaw = Math.atan2(ux, uz); // face the enemy (model faces -z)
+    pl.p = end;
+    pl.yaw = yaw;
+    pl.lockUntil = now() + LAUNCH_MS + PUNCHES * PUNCH_GAP + 150;
+    send(pl.ws, { t: 'teleport', p: end, yaw, lockMs: pl.lockUntil - now(), launchMs: LAUNCH_MS });
+    broadcast({ t: 'fx', kind: 'berserk', from: pl.id, to: opp.id, weapon: type, start, end, launchMs: LAUNCH_MS });
+    const perPunch = def.damage / PUNCHES; // 2.5 each -> 20 total
+    let dealt = 0;
+    for (let i = 0; i < PUNCHES; i++) {
+      setTimeout(() => {
+        if (!stillFighting(pl, opp)) return;
+        const amount = Math.round(perPunch * (i + 1)) - dealt; // keeps the total at exactly 20
+        dealt += amount;
+        broadcast({ t: 'fx', kind: 'punch', from: pl.id, to: opp.id, weapon: type, n: i });
+        if (amount > 0) damage(opp, amount, pl, type);
+      }, LAUNCH_MS + i * PUNCH_GAP);
+    }
+    return use();
+  }
+
+  if (def.kind === 'poopgun') {
+    // Poop Bazooka: a stream of poop, 25 damage if it's aimed at the enemy
+    const chest = [opp.p[0], opp.p[1] + 1.1, opp.p[2]];
+    const to = [chest[0] - origin[0], chest[1] - origin[1], chest[2] - origin[2]];
+    const dist = Math.hypot(...to);
+    const tolerance = def.cone + Math.atan2(HIT_TUNING.bodyRadius, Math.max(dist, 0.1)) * 180 / Math.PI;
+    const hit = (Math.hypot(to[0], to[2]) < HIT_TUNING.bodyRadius) || (dist <= def.range && angleBetween(dir, to) <= tolerance);
+    broadcast({ t: 'fx', kind: 'attack', from: pl.id, weapon: type, origin, dir: hit ? to.map(v => v / dist) : dir, hit: hit ? opp.id : null, impact: hit ? chest : null });
+    if (hit) {
+      const TICKS = 5;
+      for (let i = 0; i < TICKS; i++) {
+        setTimeout(() => { if (stillFighting(pl, opp)) damage(opp, def.damage / TICKS, pl, type); }, 150 + i * 180);
+      }
+    }
+    return use();
+  }
+}
+
 function finishUse(pl) {
   if (pl.weapon && pl.weapon.uses <= 0) {
     broadcast({ t: 'broke', id: pl.id, weapon: pl.weapon.type });
@@ -291,7 +383,8 @@ function handlePickup(pl, msg) {
   }
   if (!best) return;
   weapons.delete(best.id);
-  pl.weapon = { type: best.type, uses: best.uses ?? USES_PER_WEAPON };
+  pl.weapon = { type: best.type, uses: best.uses ?? usesOf(best.type) };
+  pl.lastAttack = 0; // a fresh weapon is ready to use right away
   send(pl.ws, { t: 'picked', weapon: best.type });
 }
 
@@ -319,6 +412,7 @@ wss.on('connection', (ws) => {
       case 'state': {
         if (!Array.isArray(msg.p) || msg.p.length !== 3 || !msg.p.every(Number.isFinite)) return;
         if (pl.hp <= 0 && game.phase === 'fight') return; // downed players stay put
+        if (now() < pl.lockUntil) return;                // mid-berserk: server controls position
         pl.p = [
           Math.max(-HALF, Math.min(HALF, msg.p[0])),
           Math.max(0, Math.min(ARENA.height - 2, msg.p[1])),
@@ -332,6 +426,13 @@ wss.on('connection', (ws) => {
       case 'attack': handleAttack(pl, msg); break;
       case 'pickup': handlePickup(pl, msg); break;
       case 'drop': handleDrop(pl); break;
+      case 'debugSpawn':
+        if (process.env.DEBUG_SPAWN && WEAPONS[msg.type] && game.phase === 'fight') {
+          spawnWeapon(msg.type);
+          const w = [...weapons.values()].pop();
+          w.x = pl.p[0] + 1; w.z = pl.p[2]; w.spawnAt = now() - FALL_MS - 1;
+        }
+        break;
       case 'name': {
         if (typeof msg.name === 'string') {
           const clean = msg.name.replace(/[^\w \-]/g, '').trim().slice(0, 16);

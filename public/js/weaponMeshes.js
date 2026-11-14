@@ -235,6 +235,104 @@ const BUILDERS = {
     g.add(part(new THREE.ConeGeometry(0.08, 0.2, 10), mat(0xd42a2a), 0, 0.98, -0.05));
     return g;
   },
+
+  // ---------------- SPECIAL WEAPONS ----------------
+  berserk_helmet: (c) => {
+    // horned battle helmet with glowing red eye slit; built centered on the head
+    const g = new THREE.Group();
+    const dome = part(new THREE.SphereGeometry(0.2, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.6), mat(0x4a4a52, { metalness: 0.9, roughness: 0.3 }), 0, 0, 0);
+    g.add(dome);
+    g.add(part(new THREE.TorusGeometry(0.19, 0.025, 6, 24), mat(0xc9a227, { metalness: 0.9 }), 0, -0.03, 0, Math.PI / 2));
+    g.add(part(box(0.03, 0.22, 0.03), mat(0x4a4a52, { metalness: 0.9 }), 0, -0.1, -0.19)); // nose guard
+    const eyes = part(box(0.24, 0.035, 0.03), glow(c), 0, -0.07, -0.175);
+    g.add(eyes);
+    for (const sd of [-1, 1]) {
+      const horn = new THREE.Group();
+      horn.add(part(new THREE.ConeGeometry(0.05, 0.3, 8), mat(0xf2e6c9), 0, 0.15, 0));
+      horn.position.set(0.17 * sd, 0.05, 0);
+      horn.rotation.z = -0.9 * sd;
+      g.add(horn);
+    }
+    g.add(part(new THREE.ConeGeometry(0.035, 0.14, 6), mat(c, { emissive: c, emissiveIntensity: 0.8 }), 0, 0.22, 0)); // spike
+    return g;
+  },
+  poop_bazooka: (c) => {
+    const g = new THREE.Group();
+    g.add(part(box(0.06, 0.15, 0.1), mat(HANDLE_DARK), 0, -0.02, 0.1, 0.3));
+    g.add(part(cyl(0.11, 0.11, 0.9, 14), mat(c), 0, 0.35, -0.05));
+    g.add(part(cyl(0.13, 0.11, 0.12, 14), mat(0xffd000), 0, 0.82, -0.05));       // golden muzzle
+    g.add(part(cyl(0.08, 0.08, 0.3, 10), mat(0x5a3a1a), 0, 0.2, 0.15));          // ammo drum
+    // a poop pile on top as the sight
+    const pile = new THREE.Group();
+    [[0.07, 0], [0.055, 0.06], [0.035, 0.11]].forEach(([r, y]) => pile.add(part(new THREE.SphereGeometry(r, 10, 8), mat(0x7a4a1a), 0, y, 0)));
+    pile.position.set(0, 0.45, -0.18);
+    g.add(pile);
+    return g;
+  },
+  dragon_sword: (c) => {
+    const g = new THREE.Group();
+    g.add(part(cyl(0.028, 0.028, 0.26), mat(0x2a1a0a), 0, 0.1, 0));
+    // dragon head is the guard; the blade comes out of its jaws
+    const head = new THREE.Group();
+    head.position.y = 0.3;
+    const skull = part(box(0.16, 0.14, 0.24), mat(c, { metalness: 0.5 }), 0, 0, 0.02);
+    head.add(skull);
+    head.add(part(box(0.13, 0.05, 0.2), mat(c, { metalness: 0.5 }), 0, 0.03, -0.17));      // upper snout
+    head.add(part(box(0.12, 0.04, 0.18), mat(0x158a45), 0, -0.06, -0.15, -0.35));          // open lower jaw
+    for (const sd of [-1, 1]) {
+      head.add(part(new THREE.SphereGeometry(0.025, 8, 6), glow(0xffd000), 0.07 * sd, 0.05, -0.04)); // eyes
+      const horn = part(new THREE.ConeGeometry(0.025, 0.2, 6), mat(0xf2e6c9), 0.06 * sd, 0.1, 0.12, 0.8, 0, 0);
+      head.add(horn);
+      for (let i = 0; i < 3; i++) head.add(part(new THREE.ConeGeometry(0.012, 0.04, 4), mat(0xffffff), 0.045 * sd, -0.01, -0.12 - i * 0.04, Math.PI)); // teeth
+    }
+    head.add(part(new THREE.ConeGeometry(0.03, 0.12, 4), mat(0x158a45), 0, 0.1, 0.05)); // crest
+    head.rotation.x = -Math.PI / 2; // snout points up the blade
+    g.add(head);
+    // wavy blade with an emerald glow
+    const blade = part(box(0.08, 1.05, 0.015), mat(0xd8ffe8, { metalness: 0.9, roughness: 0.15, emissive: c, emissiveIntensity: 0.35 }), 0, 0.95, 0);
+    g.add(blade);
+    g.add(part(new THREE.ConeGeometry(0.04, 0.14, 4), mat(0xd8ffe8, { metalness: 0.9 }), 0, 1.54, 0));
+    return g;
+  },
+  fire_spear: (c) => {
+    const g = new THREE.Group();
+    g.add(part(cyl(0.025, 0.025, 1.6, 8), mat(0x2b1a0e), 0, 0.5, 0));
+    g.add(part(new THREE.TorusGeometry(0.035, 0.012, 6, 12), mat(0xc9a227, { metalness: 0.9 }), 0, 1.25, 0, Math.PI / 2));
+    g.add(part(new THREE.ConeGeometry(0.07, 0.35, 6), glow(c), 0, 1.45, 0));
+    const flames = new THREE.Group();
+    flames.userData.flames = true;
+    for (let i = 0; i < 6; i++) {
+      const f = part(new THREE.ConeGeometry(0.07, 0.25, 5), glow(i % 2 ? 0xff3d00 : 0xffd000), 0, 1.3 + i * 0.05, 0);
+      f.material = f.material.clone(); f.material.transparent = true; f.material.opacity = 0.7;
+      flames.add(f);
+    }
+    g.add(flames);
+    return g;
+  },
+  birthday_cake: (c) => {
+    const g = new THREE.Group();
+    g.add(part(cyl(0.22, 0.22, 0.02, 20), mat(0xffffff), 0, 0, 0));                 // plate
+    g.add(part(cyl(0.18, 0.18, 0.14, 20), mat(c), 0, 0.08, 0));                     // bottom tier
+    g.add(part(cyl(0.185, 0.185, 0.025, 20), mat(0xffffff), 0, 0.16, 0));           // frosting
+    g.add(part(cyl(0.12, 0.12, 0.1, 20), mat(0xfff0f7), 0, 0.22, 0));               // top tier
+    const sprinkleCols = [0xff3df2, 0x00e5ff, 0xffd000, 0x7dff3d];
+    for (let i = 0; i < 14; i++) {
+      const a = i / 14 * Math.PI * 2;
+      g.add(part(box(0.02, 0.008, 0.008), mat(sprinkleCols[i % 4]), Math.cos(a) * 0.16, 0.13, Math.sin(a) * 0.16, 0, a, 0));
+    }
+    const flames = new THREE.Group();
+    flames.userData.flames = true;
+    for (let i = 0; i < 5; i++) {
+      const a = i / 5 * Math.PI * 2;
+      const x = Math.cos(a) * 0.07, z = Math.sin(a) * 0.07;
+      g.add(part(cyl(0.008, 0.008, 0.08, 6), mat(sprinkleCols[i % 4]), x, 0.31, z));
+      const f = part(new THREE.ConeGeometry(0.012, 0.035, 5), glow(0xffb000), x, 0.37, z);
+      f.material = f.material.clone(); f.material.transparent = true;
+      flames.add(f);
+    }
+    g.add(flames);
+    return g;
+  },
 };
 
 export function buildWeaponMesh(type) {
@@ -253,7 +351,8 @@ export function animateWeaponMesh(mesh, t) {
       o.children.forEach((f, i) => {
         const s = 0.7 + Math.sin(t * 20 + i * 1.7) * 0.3;
         f.scale.set(s, 0.8 + Math.sin(t * 15 + i) * 0.4, s);
-        f.position.x = Math.sin(t * 13 + i * 2) * 0.03;
+        if (!f.userData.base) f.userData.base = f.position.clone();
+        f.position.x = f.userData.base.x + Math.sin(t * 13 + i * 2) * 0.02;
       });
     }
     if (o.userData.chain) o.position.z = -0.05 + Math.sin(t * 80) * 0.01;
