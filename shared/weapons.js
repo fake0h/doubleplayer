@@ -124,12 +124,20 @@ export const BOMBS = { count: 100, spreadMs: 2500, fuseMs: 3000 };
 export const ARENA = {
   size: 60,          // square room, -30..30 on x and z
   height: 40,        // tall enough for the jump pads to fling you sky-high
-  // 4 pressure pads: 2+ players standing on them starts a free-for-all for up to 4
+  // The square has 4 quadrants. Two corners hold game-mode pads:
+  // 4xPVP (southwest corner, neon green): 2+ players start the weapons free-for-all for up to 4
   pads: [
-    { x: -8, z: -8, r: 2.2 },
-    { x: 8,  z: -8, r: 2.2 },
-    { x: -8, z: 8,  r: 2.2 },
-    { x: 8,  z: 8,  r: 2.2 },
+    { x: -24.5, z: 17.5, r: 2.2 },
+    { x: -17.5, z: 17.5, r: 2.2 },
+    { x: -24.5, z: 24.5, r: 2.2 },
+    { x: -17.5, z: 24.5, r: 2.2 },
+  ],
+  // Say Cheese (northeast corner, yellow): game still being designed
+  cheesePads: [
+    { x: 24.5, z: -17.5, r: 2.2 },
+    { x: 17.5, z: -17.5, r: 2.2 },
+    { x: 24.5, z: -24.5, r: 2.2 },
+    { x: 17.5, z: -24.5, r: 2.2 },
   ],
   maxFighters: 4,
   dropHeight: 36,
@@ -155,11 +163,9 @@ export const ARENA = {
   walls: [
     { x: 0,   z: -8,  len: 8, ax: 'x' }, { x: 0,   z: 8,   len: 8, ax: 'x' },
     { x: -16, z: -4,  len: 8, ax: 'z' }, { x: 16,  z: 4,   len: 8, ax: 'z' },
-    { x: -16, z: 14,  len: 8, ax: 'x' }, { x: 16,  z: -14, len: 8, ax: 'x' },
     { x: -6,  z: 18,  len: 8, ax: 'z' }, { x: 6,   z: -18, len: 8, ax: 'z' },
     { x: -22, z: 4,   len: 7, ax: 'x' }, { x: 22,  z: -4,  len: 7, ax: 'x' },
     { x: 0,   z: 24,  len: 8, ax: 'x' }, { x: 0,   z: -24, len: 8, ax: 'x' },
-    { x: -24, z: 14,  len: 6, ax: 'z' }, { x: 24,  z: -14, len: 6, ax: 'z' },
     { x: -9,  z: -15, len: 6, ax: 'x' }, { x: 9,   z: 15,  len: 6, ax: 'x' },
     { x: 14,  z: 22,  len: 6, ax: 'z' }, { x: -14, z: -22, len: 6, ax: 'z' },
   ],
@@ -171,7 +177,9 @@ export function jumpPadPos(i, t) {
   const sp = ARENA.jumpPadMoveSpeed;
   const a = t * sp * (i % 2 === 0 ? 1 : -1.3) + i * Math.PI / 2 + Math.PI / 4;
   // two tracks: pads 0 & 2 on an outer ring, pads 1 & 3 on an inner ring (so they never collide)
-  const r = i % 2 === 0 ? 23.5 + 1.5 * Math.sin(t * sp * 2.3 + i * 1.7) : 16.6 + 1 * Math.sin(t * sp * 2.3 + i * 1.7);
+  // outer track dips inward near the 4xPVP and Say Cheese corners so pads never roll over them
+  const dip = Math.pow(Math.max(0, Math.cos(2 * (a - 3 * Math.PI / 4))), 2);
+  const r = i % 2 === 0 ? 23.5 + 1.5 * Math.sin(t * sp * 2.3 + i * 1.7) - 6.5 * dip : 11.4 + 0.6 * Math.sin(t * sp * 2.3 + i * 1.7);
   return { x: Math.cos(a) * r, z: Math.sin(a) * r };
 }
 

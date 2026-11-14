@@ -2,7 +2,12 @@
 
 A 2-to-4-player 3D wireframe arena brawler that runs in the browser. **(Touchscreen compatible)**: play on a computer or an iPad.
 
-Everyone who opens the site appears as a glowing wireframe body in a big neon room. The room has **four pressure pads**. When 2 or more players stand on them, a **3, 2, 1** countdown starts, and anyone who hops on a free pad before it ends joins in. Then weapons rain down from the ceiling and it's a free-for-all. Knocked-out players lie down and watch, and the **last one standing wins**.
+Everyone who opens the site appears as a glowing wireframe body in a big neon room split into four quadrants. Two corners hold games:
+
+- **4xPVP** (southwest corner, neon-green pads, big 4xPVP sign): the weapons free-for-all described below.
+- **Say Cheese** (northeast corner, yellow pads, big smiley face): coming soon.
+
+The 4xPVP corner has **four pressure pads**. When 2 or more players stand on them, a **3, 2, 1** countdown starts, and anyone who hops on a free pad before it ends joins in. Then weapons rain down from the ceiling and it's a free-for-all. Knocked-out players lie down and watch, and the **last one standing wins**.
 
 ## The arena
 

@@ -371,10 +371,10 @@ const showcase = [];
 }
 
 // ---------- pressure pads ----------
-const pads = ARENA.pads.map((p, i) => {
+const PVP_GREEN = 0x39ff14, CHEESE_YELLOW = 0xffd400;
+function makePad(p, color) {
   const g = new THREE.Group();
   g.position.set(p.x, 0, p.z);
-  const color = [0x00e5ff, 0xff3df2, 0xa855ff, 0xffb300][i % 4]; // green is reserved for jump pads
   const base = new THREE.Mesh(new THREE.CylinderGeometry(p.r + 0.3, p.r + 0.4, 0.15, 40),
     new THREE.MeshStandardMaterial({ color: 0x1b1f2b, metalness: 0.6, roughness: 0.4 }));
   base.position.y = 0.075;
@@ -394,7 +394,54 @@ const pads = ARENA.pads.map((p, i) => {
   g.add(base, plate, ring, beam, light);
   scene.add(g);
   return { group: g, plate, plateMat, ring, beam, light, pressed: 0, active: false };
-});
+}
+const pads = ARENA.pads.map((p) => makePad(p, PVP_GREEN));                  // 4xPVP corner (southwest)
+const cheesePads = ARENA.cheesePads.map((p) => makePad(p, CHEESE_YELLOW));  // Say Cheese corner (northeast)
+function onCheesePad(x, z, y) {
+  return ARENA.cheesePads.some(p => Math.hypot(x - p.x, z - p.z) <= p.r && y < 1);
+}
+
+// ---------- corner signs ----------
+function wallSign(draw, w, h, pos, rotY) {
+  const c = document.createElement('canvas');
+  c.width = 1024; c.height = Math.round(1024 * h / w);
+  draw(c.getContext('2d'), c.width, c.height);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+  m.position.copy(pos); m.rotation.y = rotY;
+  scene.add(m);
+  return m;
+}
+// 4xPVP on the west wall above the green pads
+wallSign((x, W, Hc) => {
+  x.fillStyle = 'rgba(2,12,2,0.85)'; x.fillRect(0, 0, W, Hc);
+  x.strokeStyle = '#39ff14'; x.lineWidth = 18; x.shadowColor = '#39ff14'; x.shadowBlur = 30;
+  x.strokeRect(20, 20, W - 40, Hc - 40);
+  x.fillStyle = '#39ff14'; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.font = '900 300px sans-serif'; x.fillText('4xPVP', W / 2, Hc * 0.45);
+  x.shadowBlur = 0; x.fillStyle = '#d8ffd0'; x.font = 'bold 56px sans-serif';
+  x.fillText('Weapons free-for-all · 2-4 players · stand on a green pad', W / 2, Hc * 0.82, W - 80);
+}, 12, 6, new THREE.Vector3(-HALF + 0.1, 6, 21), Math.PI / 2);
+const pvpFloor = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), new THREE.MeshBasicMaterial({ color: PVP_GREEN, transparent: true, opacity: 0.06, depthWrite: false }));
+pvpFloor.rotation.x = -Math.PI / 2; pvpFloor.position.set(-21, 0.015, 21); scene.add(pvpFloor);
+// Say Cheese: big yellow smiley on the east wall above the yellow pads
+wallSign((x, W, Hc) => {
+  const cx = W / 2, cy = Hc * 0.42, r = Hc * 0.34;
+  x.shadowColor = '#ffd400'; x.shadowBlur = 40;
+  x.fillStyle = '#ffd400'; x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.fill();
+  x.shadowBlur = 0;
+  x.lineWidth = 14; x.strokeStyle = '#b38f00'; x.stroke();
+  x.fillStyle = '#1a1200';
+  x.beginPath(); x.ellipse(cx - r * 0.35, cy - r * 0.25, r * 0.11, r * 0.17, 0, 0, Math.PI * 2); x.fill();
+  x.beginPath(); x.ellipse(cx + r * 0.35, cy - r * 0.25, r * 0.11, r * 0.17, 0, 0, Math.PI * 2); x.fill();
+  x.lineWidth = r * 0.09; x.lineCap = 'round'; x.strokeStyle = '#1a1200';
+  x.beginPath(); x.arc(cx, cy + r * 0.05, r * 0.55, 0.15 * Math.PI, 0.85 * Math.PI); x.stroke();
+  x.fillStyle = '#ffd400'; x.textAlign = 'center'; x.font = '900 120px sans-serif';
+  x.shadowColor = '#ffd400'; x.shadowBlur = 20;
+  x.fillText('SAY CHEESE', cx, Hc * 0.95);
+}, 11, 9, new THREE.Vector3(HALF - 0.1, 7, -21), -Math.PI / 2);
+const cheeseFloor = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), new THREE.MeshBasicMaterial({ color: CHEESE_YELLOW, transparent: true, opacity: 0.06, depthWrite: false }));
+cheeseFloor.rotation.x = -Math.PI / 2; cheeseFloor.position.set(21, 0.015, -21); scene.add(cheeseFloor);
 
 // ---------- HUD helpers ----------
 const $ = (id) => document.getElementById(id);
@@ -1475,6 +1522,16 @@ function updatePads(dt, t) {
     pad.beam.material.opacity = counting ? 0.12 + Math.sin(t * 12) * 0.06 : pad.pressed * 0.05;
     pad.ring.scale.setScalar(1 + (on ? Math.sin(t * 6) * 0.04 : 0));
   });
+  // Say Cheese pads light up when someone stands on them (game coming soon)
+  cheesePads.forEach((pad, i) => {
+    const p = ARENA.cheesePads[i];
+    const on = snap.players.some(pl => Math.hypot(pl.p[0] - p.x, pl.p[2] - p.z) <= p.r && pl.p[1] < 1);
+    pad.pressed += ((on ? 1 : 0) - pad.pressed) * Math.min(1, dt * 10);
+    pad.plate.position.y = 0.16 - pad.pressed * 0.07;
+    pad.plateMat.emissiveIntensity = 0.25 + pad.pressed * 1.6;
+    pad.light.intensity = pad.pressed * 12;
+    pad.ring.scale.setScalar(1 + (on ? Math.sin(t * 6) * 0.04 : 0));
+  });
   // hatches glow when weapons are dropping
   hatchFlash = Math.max(0, hatchFlash - dt * 0.8);
   const fighting = snap.phase === 'fight';
@@ -1535,7 +1592,8 @@ function updateHud() {
   if (snap.phase === 'lobby') {
     const others = snap.players.length - 1;
     status = others < 1 ? 'Waiting for a second player to join… (share this link!)'
-      : `Stand on a pressure pad · ${occupied}/${ARENA.pads.length} pressed · 2-4 players can battle`;
+      : `4xPVP: stand on a green pad in the southwest corner · ${occupied}/${ARENA.pads.length} pressed`;
+    if (onCheesePad(me.pos.x, me.pos.z, me.pos.y)) status = '🧀 Say Cheese — coming soon!';
   } else if (snap.phase === 'countdown') status = isFighter() ? 'Get ready!' : 'Battle starting — jump on a free pad to join!';
   else if (snap.phase === 'fight') {
     const alive = snap.fighters.filter(id => (snap.players.find(p => p.id === id)?.hp ?? 0) > 0).length;
