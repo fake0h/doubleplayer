@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
-  WEAPONS, USES_PER_WEAPON, MAX_HEALTH, ARENA, FALL_MS, randomWeaponType,
+  WEAPONS, USES_PER_WEAPON, MAX_HEALTH, ARENA, FALL_MS, randomWeaponType, HIT_TUNING,
 } from './shared/weapons.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -222,15 +222,21 @@ function handleAttack(pl, msg) {
     const chest = [opp.p[0], opp.p[1] + 1.1, opp.p[2]];
     const to = [chest[0] - origin[0], chest[1] - origin[1], chest[2] - origin[2]];
     const dist = Math.hypot(...to);
-    if (def.kind === 'melee') {
+    const flatDist = Math.hypot(to[0], to[2]);
+    if (flatDist < HIT_TUNING.bodyRadius) {
+      // point blank: players overlapping always connect
+      hitId = opp.id;
+    } else if (def.kind === 'melee') {
       // melee uses horizontal facing so you don't need precise vertical aim
       const flatTo = [to[0], 0, to[2]];
       const flatDir = [dir[0], 0, dir[2]];
-      if (dist <= def.range + 0.4 && angleBetween(flatDir, flatTo) <= def.cone / 2) hitId = opp.id;
+      // widen the cone up close so you can't slip past someone standing right next to you
+      const closeBonus = Math.atan2(HIT_TUNING.bodyRadius, Math.max(dist, 0.1)) * 180 / Math.PI;
+      if (dist <= def.range + HIT_TUNING.bodyRadius && angleBetween(flatDir, flatTo) <= def.cone / 2 + closeBonus) hitId = opp.id;
     } else {
       // bigger tolerance up close (body is wider than a point)
-      const tolerance = def.cone / 2 + Math.atan2(0.45, Math.max(dist, 0.1)) * 180 / Math.PI;
-      if (dist <= def.range && angleBetween(dir, to) <= tolerance) hitId = opp.id;
+      const tolerance = def.cone / 2 + Math.atan2(HIT_TUNING.bodyRadius, Math.max(dist, 0.1)) * 180 / Math.PI;
+      if (dist <= def.range + HIT_TUNING.bodyRadius && angleBetween(dir, to) <= tolerance) hitId = opp.id;
     }
     if (hitId) impact = chest;
     // rocket splash: near-misses still hurt

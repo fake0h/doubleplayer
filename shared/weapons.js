@@ -38,6 +38,25 @@ export const WEAPONS = {
   rocket_launcher: { name: 'Rocket Launcher',  kind: 'ranged', damage: 60, range: 60,  cone: 5,  cooldown: 2200, color: 0x3a5f2a, rarity: 1, splash: 4 },
 };
 
+// ---- Hit area tuning ----
+// Turn these up or down to make every weapon easier or harder to land.
+export const HIT_TUNING = {
+  meleeRange: 1.4,    // melee reach multiplier
+  meleeCone: 1.6,     // melee swing width multiplier (capped at 150 degrees)
+  rangedCone: 1.8,    // aim forgiveness multiplier for guns, bows, sprays
+  splash: 1.75,       // rocket blast radius multiplier
+  bodyRadius: 0.75,   // how "wide" a player's body counts as for hits (meters)
+};
+for (const w of Object.values(WEAPONS)) {
+  if (w.kind === 'melee') {
+    w.range = +(w.range * HIT_TUNING.meleeRange).toFixed(1);
+    w.cone = Math.min(150, Math.round(w.cone * HIT_TUNING.meleeCone));
+  } else {
+    w.cone = Math.round(w.cone * HIT_TUNING.rangedCone);
+  }
+  if (w.splash) w.splash = +(w.splash * HIT_TUNING.splash).toFixed(1);
+}
+
 export const WEAPON_IDS = Object.keys(WEAPONS);
 
 // Weighted random pick: rarity 3 = common, 1 = rare.
