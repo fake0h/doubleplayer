@@ -37,6 +37,7 @@ sun.shadow.mapSize.set(COARSE ? 1024 : 2048, COARSE ? 1024 : 2048);
 scene.add(sun);
 
 // ---------- the room ----------
+let roomEdges = null;
 const S = ARENA.size, H = ARENA.height, HALF = S / 2;
 {
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(S, S),
@@ -56,6 +57,7 @@ const S = ARENA.size, H = ARENA.height, HALF = S / 2;
   scene.add(room);
   const edges = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(S, H, S)),
     new THREE.LineBasicMaterial({ color: 0xff3df2 }));
+  roomEdges = edges;
   edges.position.y = H / 2;
   scene.add(edges);
 
@@ -446,7 +448,7 @@ function wallSign(draw, w, h, pos, rotY) {
   return m;
 }
 // 4xPVP on the west wall above the green pads
-wallSign((x, W, Hc) => {
+const pvpSign = wallSign((x, W, Hc) => {
   x.fillStyle = 'rgba(2,12,2,0.85)'; x.fillRect(0, 0, W, Hc);
   x.strokeStyle = '#39ff14'; x.lineWidth = 18; x.shadowColor = '#39ff14'; x.shadowBlur = 30;
   x.strokeRect(20, 20, W - 40, Hc - 40);
@@ -458,7 +460,7 @@ wallSign((x, W, Hc) => {
 const pvpFloor = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), new THREE.MeshBasicMaterial({ color: PVP_GREEN, transparent: true, opacity: 0.06, depthWrite: false }));
 pvpFloor.rotation.x = -Math.PI / 2; pvpFloor.position.set(-21, 0.015, 21); scene.add(pvpFloor);
 // Say Cheese: big yellow smiley on the east wall above the yellow pads
-wallSign((x, W, Hc) => {
+const cheeseSign = wallSign((x, W, Hc) => {
   const cx = W / 2, cy = Hc * 0.42, r = Hc * 0.34;
   x.shadowColor = '#ffd400'; x.shadowBlur = 40;
   x.fillStyle = '#ffd400'; x.beginPath(); x.arc(cx, cy, r, 0, Math.PI * 2); x.fill();
@@ -1751,6 +1753,12 @@ function updatePads(dt, t) {
     pad.light.intensity = pad.pressed * 12;
     pad.ring.scale.setScalar(1 + (on ? Math.sin(t * 6) * 0.04 : 0));
   });
+  // Lobby vs. active game: pads, corner signs and floor tints only show in the lobby (and during
+  // the countdown so people can still hop on). During a game the room outline takes the game's color.
+  const lobbyLook = snap.phase === 'lobby' || snap.phase === 'countdown';
+  for (const pad of [...pads, ...cheesePads]) pad.group.visible = lobbyLook;
+  pvpSign.visible = cheeseSign.visible = pvpFloor.visible = cheeseFloor.visible = lobbyLook;
+  if (roomEdges) roomEdges.material.color.setHex(lobbyLook ? 0xff3df2 : snap.mode === 'cheese' ? 0xffd400 : 0xff3030);
   // hatches glow when weapons are dropping
   hatchFlash = Math.max(0, hatchFlash - dt * 0.8);
   const fighting = snap.phase === 'fight';
