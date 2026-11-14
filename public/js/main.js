@@ -819,7 +819,8 @@ function connect() {
         const lvl = m.muscle || 0;
         const streakLine = m.streak >= 2 ? `\n${m.streak} wins in a row!` : '';
         const muscleLine = lvl >= 5 ? ' MAX MUSCLE — GLOWING!' : lvl > 0 ? ` Muscle level ${lvl}` : '';
-        banner(m.mode === 'cheese' ? `🧀 ${m.name} WINS SAY CHEESE! 🧀\n${m.reason}` : `${m.name} WINS!\n${m.reason}${streakLine}${muscleLine ? `\n💪${muscleLine}` : ''}`, 5500);
+        if (m.mode === 'cheese') showCheeseResults(m);
+        banner(m.mode === 'cheese' ? `🧀 ${m.name} WINS SAY CHEESE! 🧀` : `${m.name} WINS!\n${m.reason}${streakLine}${muscleLine ? `\n💪${muscleLine}` : ''}`, 5500);
         if (lvl > 0) feed(`${m.name} bulked up to muscle level ${lvl}${lvl >= 5 ? ' (MAX — glowing!)' : ''}`, '#ffd23c');
         feed(m.reason, '#ffd23c');
         tone(m.winner === me.id ? 660 : 200, 0.6, 'triangle', 0.15, m.winner === me.id ? 400 : -100);
@@ -1189,6 +1190,7 @@ const cheeseEl = { count: $('camCount'), ask: $('camAsk'), overlay: $('faceOverl
 let cheeseScoreSent = 0;
 let cheeseFacesSent = 0;
 let localIds = null;          // local game (one camera, 2-4 people): cheese player ids, left to right
+let winningFaces = {};        // player id -> close-ups of every round they won this game
 const VIRTUAL_COLORS = [0x00e5ff, 0xff3df2, 0x7dff3d, 0xffb300];
 const virtualAvatars = new Map(); // id -> { body, label }
 function isLocalHost() { return !!snap.cheese?.local && snap.cheese.host === me.id; }
@@ -1246,6 +1248,7 @@ async function showCameraAsk() {
 function onCheeseStart(m) {
   me.cheeseSpot = m.spot;
   localIds = null;
+  winningFaces = {};
   document.exitPointerLock?.();
   if (m.local) {
     // started alone: ask how many people are playing on this camera first
@@ -1301,6 +1304,7 @@ function onCheeseFlash(m) {
   } else if (m.photoFrom === me.id && scorer.bestPhoto) send({ t: 'cheesePhoto', data: scorer.bestPhoto });
 }
 function onCheesePhoto(m) {
+  (winningFaces[m.id] ||= []).push(m.data);
   const img = new Image();
   img.onload = () => {
     const tex = new THREE.Texture(img);
@@ -1329,6 +1333,7 @@ function updateCheese(dt, t) {
     cheeseEl.hud.style.display = 'none';
     if (virtualAvatars.size) updateVirtualAvatars(dt);
     if (snap.phase === 'lobby') {
+      resultsEl.style.display = 'none';
       // keep the camera connected for the next game; just hide the preview
       if (me.cheeseSpot) { me.cheeseSpot = null; cheeseEl.cam.style.display = 'none'; cheeseEl.note.style.display = 'none'; cheeseEl.preview.style.display = 'none'; }
       photoMat.map = null; photoMat.color.set(0x222222);
@@ -1371,8 +1376,11 @@ function updateCheese(dt, t) {
     cheeseEl.emotion.textContent = `Make ${aOrAn(name).toLowerCase()} ${name.toUpperCase()} face!`;
     cheeseEl.timer.textContent = n;
     if (n !== lastTimerNum) { lastTimerNum = n; if (n <= 3) tone(660 + (3 - n) * 110, 0.1, 'square', 0.07); }
+  } else if (C.stage === 'ready') {
+    cheeseEl.emotion.textContent = `Get ready: ${aOrAn(name).toLowerCase()} ${name.toUpperCase()} face!`;
+    cheeseEl.timer.textContent = '…';
+    lastTimerNum = null;
   } else if (C.stage === 'flash') { cheeseEl.emotion.textContent = 'SAY CHEESE!'; cheeseEl.timer.textContent = '📸'; lastTimerNum = null; }
-  else if (C.stage === 'reveal') { cheeseEl.emotion.textContent = 'Next round coming up…'; cheeseEl.timer.textContent = ''; }
   else { cheeseEl.emotion.textContent = ''; cheeseEl.timer.textContent = ''; }
   // live ratings + wins for every player
   const rows = [...C.players].sort((a, b) => b[3] - a[3] || b[1] - a[1]);
@@ -1386,6 +1394,28 @@ function updateCheese(dt, t) {
   }).join('');
   updateVirtualAvatars(dt);
 }
+
+// End of game: horizontal bar chart, winner on top, each bar filled with that player's winning faces
+const resultsEl = $('cheeseResults');
+function showCheeseResults(m) {
+  const standings = m.standings || [];
+  const maxWins = Math.max(CHEESE.winsToWin, ...standings.map(s => s[2]));
+  const medals = ['🥇', '🥈', '🥉', '4️⃣'];
+  // spectators who joined mid-game may have missed some photos; they still see the bars
+  if (!Object.keys(winningFaces).length && !standings.length) return;
+  $('resultsSub').textContent = m.reason || '';
+  $('resultsRows').innerHTML = standings.map(([id, name, wins], i) => {
+    const faces = winningFaces[id] || [];
+    const tiles = Array.from({ length: wins }, (_, k) => faces[k] ? `<img src="${faces[k]}" alt="">` : `<div class="noimg">😀</div>`).join('');
+    return `<div class="rrow ${i === 0 ? 'first' : ''}"><div class="place">${medals[i] || i + 1}</div><div class="nm">${name}</div>
+      <div class="track"><div class="bar" style="width:0%;${wins ? '' : 'padding:0'}" data-w="${wins ? Math.max(12, (wins / maxWins) * 100) : 0}">${tiles}</div></div><div class="wins">${wins}</div></div>`;
+  }).join('');
+  resultsEl.style.display = 'block';
+  document.exitPointerLock?.();
+  // grow the bars in
+  requestAnimationFrame(() => requestAnimationFrame(() => resultsEl.querySelectorAll('.bar').forEach(b => { b.style.width = b.dataset.w + '%'; })));
+}
+resultsEl.addEventListener('click', (e) => { e.stopPropagation(); resultsEl.style.display = 'none'; });
 
 // Boxes around each face in the camera preview, labeled Player 1..4 (left to right)
 function drawFaceBoxes(local, posing) {

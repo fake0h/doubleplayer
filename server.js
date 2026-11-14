@@ -393,11 +393,11 @@ function nextCheeseRound(t) {
   cheese.recent = [...cheese.recent, emotion].slice(-12);
   cheese.round++;
   cheese.emotion = emotion;
-  cheese.stage = 'pose';
-  cheese.stageEndsAt = t + CHEESE.poseMs;
-  cheese.photoFrom = null;
+  // show the emotion right away, then give everyone 2 seconds before the 3-2-1 countdown
+  cheese.stage = 'ready';
+  cheese.stageEndsAt = t + CHEESE.readyMs;
   for (const cp of cheese.players) { cp.score = 0; cp.best = 0; }
-  broadcast({ t: 'cheeseRound', round: cheese.round, emotion, ms: CHEESE.poseMs });
+  broadcast({ t: 'cheeseRound', round: cheese.round, emotion, readyMs: CHEESE.readyMs, ms: CHEESE.poseMs });
 }
 function tickCheese(t) {
   if (!cheese) return;
@@ -411,22 +411,26 @@ function tickCheese(t) {
     // local: start once the camera can see every player's face; online: once everyone is ready
     const ok = cheese.local ? cheese.facesOk && cps[0].ready : cps.every(cp => cp.ready);
     if (ok || t >= cheese.stageEndsAt) nextCheeseRound(t);
+  } else if (cheese.stage === 'ready' && cheese.local && !cheese.facesOk) {
+    // someone left the camera during "get ready": wait for them, then start a fresh emotion
+    cheese.stage = 'camera'; cheese.stageEndsAt = t + 90000;
+  } else if (cheese.stage === 'ready' && t >= cheese.stageEndsAt) {
+    cheese.stage = 'pose';
+    cheese.stageEndsAt = t + CHEESE.poseMs;
   } else if (cheese.stage === 'pose' && t >= cheese.stageEndsAt) {
     // FLASH: highest score this round wins (ties share the win)
     const top = Math.max(...cps.map(cp => cp.best));
     const winners = top > 0 ? cps.filter(cp => cp.best === top) : [];
     for (const cp of winners) cp.wins++;
     cheese.stage = 'flash';
-    cheese.stageEndsAt = t + CHEESE.photoWaitMs;
     cheese.photoFrom = winners[0]?.id ?? null;
+    cheese.stageEndsAt = t + (cheese.photoFrom ? CHEESE.photoWaitMs : 600);
     broadcast({
       t: 'cheeseFlash', emotion: cheese.emotion, winners: winners.map(cp => cp.id),
       photoFrom: cheese.photoFrom, scores: cps.map(cp => [cp.id, Math.round(cp.best)]),
     });
   } else if (cheese.stage === 'flash' && t >= cheese.stageEndsAt) {
-    cheese.stage = 'reveal';
-    cheese.stageEndsAt = t + CHEESE.revealMs;
-  } else if (cheese.stage === 'reveal' && t >= cheese.stageEndsAt) {
+    // the winner's close-up is on the wall (or we waited long enough): straight on to the next emotion
     const most = Math.max(...cps.map(cp => cp.wins));
     const leaders = cps.filter(cp => cp.wins === most);
     if (most >= CHEESE.winsToWin && leaders.length === 1) {
@@ -446,8 +450,9 @@ function endCheese(reason, winnerId = null) {
   const w = cheese?.players.find(cp => cp.id === winnerId);
   game.phase = 'over';
   game.winner = winnerId;
-  game.phaseEndsAt = now() + 7000;
-  broadcast({ t: 'over', mode: 'cheese', winner: winnerId, name: w ? w.name : 'Nobody', reason });
+  game.phaseEndsAt = now() + 12000;   // time to look at the final results
+  const standings = (cheese?.players || []).map(cp => [cp.id, cp.name, cp.wins]).sort((a, b) => b[2] - a[2]);
+  broadcast({ t: 'over', mode: 'cheese', winner: winnerId, name: w ? w.name : 'Nobody', reason, standings });
   if (cheese) cheese.stage = 'done';
 }
 
@@ -876,6 +881,7 @@ wss.on('connection', (ws) => {
         if (!allowed || !msg.data.startsWith('data:image/jpeg;base64,') || msg.data.length > 400000) break;
         const cp = cheese.players.find(c => c.id === cheese.photoFrom);
         cheese.photoFrom = null;
+        if (cheese.stage === 'flash') cheese.stageEndsAt = Math.min(cheese.stageEndsAt, now() + 300);
         broadcast({ t: 'cheesePhoto', id: cp?.id, name: cp?.name ?? pl.name, emotion: cheese.emotion, data: msg.data });
         break;
       }

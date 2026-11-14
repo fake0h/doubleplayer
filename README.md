@@ -29,10 +29,11 @@ The 4xPVP corner has **four pressure pads**. When 2 or more players stand on the
 When the countdown ends:
 
 1. The players line up four across facing the back wall (the south wall, opposite the admin panel).
-2. A giant yellow smiley appears on the back wall and calls out an emotion, making that face itself: happy, scared, funny, crazy, excited, sorry, sleepy, and 26 more (33 total).
+2. A giant yellow smiley appears on the back wall and calls out an emotion, making that face itself. You get 2 seconds to get ready: happy, scared, funny, crazy, excited, sorry, sleepy, and 26 more (33 total).
 3. A quick 3, 2, 1 countdown runs while every player's camera rates their face live from 0 to 100. Everyone sees everyone's ratings.
 4. Then **FLASH**: the best face wins the round, and a close-up of the winner's face from their best moment goes up on the back wall.
-5. About 3 seconds later the next round starts. The first player to **3 wins** takes the game. If two players are tied for the lead, rounds continue until one player leads alone.
+5. As soon as the photo is up, the next emotion appears (a round takes about 5.5 seconds). The first player to **5 wins** takes the game. If two players are tied for the lead, rounds continue until one player leads alone.
+6. **Final results:** a horizontal bar chart ranks everyone from the winner on top down to last place, and each bar is filled with that player's winning faces from the game.
 
 The camera is connected when you press **PLAY** on the start screen, so Say Cheese starts right away when you step on a yellow pad. If you skipped it, the game asks again when Say Cheese starts.
 
