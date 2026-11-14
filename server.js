@@ -30,35 +30,40 @@ const ROUTES = [
   ['/', path.join(__dirname, 'public')],
 ];
 
-// Face model for Say Cheese (Google MediaPipe). Downloaded once and kept in memory so every
-// player gets it from this server; if that fails, the browser is sent to Google directly.
-const FACE_MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
-let faceModel = null, faceModelPromise = null;
-function loadFaceModel() {
-  if (!faceModelPromise) {
-    faceModelPromise = fetch(FACE_MODEL_URL)
+// MediaPipe models (Google): the face model for Say Cheese and the body/pose model for Dance Dance
+// Disco. Each is downloaded once and kept in memory so every player gets it from this server; if that
+// fails, the browser is sent to Google directly.
+const MODELS = {
+  'face_landmarker.task': 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+  'pose_landmarker_lite.task': 'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+};
+const modelCache = {}, modelLoading = {};
+function loadModel(name) {
+  if (!modelLoading[name]) {
+    modelLoading[name] = fetch(MODELS[name])
       .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer(); })
-      .then(buf => { faceModel = Buffer.from(buf); console.log(`Face model cached (${faceModel.length} bytes)`); })
-      .catch(err => { console.log('Face model download failed, browsers will fetch it from Google:', err.message); faceModelPromise = null; });
+      .then(buf => { modelCache[name] = Buffer.from(buf); console.log(`Model cached: ${name} (${modelCache[name].length} bytes)`); })
+      .catch(err => { console.log(`Model download failed (${name}), browsers will fetch it from Google:`, err.message); modelLoading[name] = null; });
   }
-  return faceModelPromise;
+  return modelLoading[name];
 }
-async function serveFaceModel(res) {
-  if (!faceModel) await loadFaceModel();
-  if (faceModel) {
+async function serveModel(name, res) {
+  if (!modelCache[name]) await loadModel(name);
+  if (modelCache[name]) {
     res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'public, max-age=86400' });
-    return res.end(faceModel);
+    return res.end(modelCache[name]);
   }
-  res.writeHead(302, { Location: FACE_MODEL_URL });
+  res.writeHead(302, { Location: MODELS[name] });
   res.end();
 }
-loadFaceModel();
+for (const name of Object.keys(MODELS)) loadModel(name);
 
 const server = http.createServer((req, res) => {
   let urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname);
   if (urlPath === '/') urlPath = '/index.html';
   if (urlPath === '/health') { res.writeHead(200); return res.end('ok'); }
-  if (urlPath === '/models/face_landmarker.task') return serveFaceModel(res);
+  const modelName = urlPath.startsWith('/models/') ? urlPath.slice(8) : null;
+  if (modelName && MODELS[modelName]) return serveModel(modelName, res);
   for (const [prefix, dir] of ROUTES) {
     if (!urlPath.startsWith(prefix)) continue;
     const file = path.normalize(path.join(dir, urlPath.slice(prefix.length)));

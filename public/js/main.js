@@ -4,7 +4,7 @@ import { WireBody } from './body.js';
 import { buildWeaponMesh, animateWeaponMesh, buildRobot } from './weaponMeshes.js';
 import { Smiley } from './smiley.js';
 import { FaceScorer } from './cheese.js';
-import { MotionMeter, DiscoMusic } from './dance.js';
+import { MotionMeter, DiscoMusic, PoseTracker, BONES } from './dance.js';
 import { DISCO } from '/shared/disco.js';
 import { emotionById, CHEESE, CHEESE_SPOTS } from '/shared/emotions.js';
 
@@ -1308,6 +1308,8 @@ function onCheeseStart(m) {
   localIds = null;
   winningFaces = {};
   camGame = m.game || 'cheese';
+  if (camGame === 'disco') pose.load();
+  danceView.classList.remove('fade');
   const disc = camGame === 'disco';
   document.querySelector('#cheeseCam h2').textContent = disc ? '🪩 DANCE DANCE DISCO' : '🧀 SAY CHEESE';
   document.querySelector('#camCount p').textContent = disc ? 'How many dancers are in front of this camera?' : 'How many players are in front of this camera?';
@@ -1533,7 +1535,7 @@ function updateVirtualAvatars(dt) {
     v.body.update(dt, false, 0.2, false);
     applyBlown(v.body.root, i, spotsList[i]);
     const pos = v.body.root.position.clone().add(new THREE.Vector3(0, 2.25, 0)).project(camera);
-    v.label.style.display = pos.z < 1 ? 'block' : 'none';
+    v.label.style.display = pos.z < 1 && danceView.style.display !== 'block' ? 'block' : 'none';
     v.label.style.left = `${(pos.x * 0.5 + 0.5) * innerWidth}px`;
     v.label.style.top = `${(-pos.y * 0.5 + 0.5) * innerHeight}px`;
   });
@@ -1544,6 +1546,59 @@ function updateVirtualAvatars(dt) {
 
 // ---------- Dance Dance Disco client ----------
 const meter = new MotionMeter();
+const pose = new PoseTracker();
+const danceView = $('danceView'), danceVideo = $('danceVideo'), danceCanvas = $('danceCanvas');
+// live camera feed behind everything, with a stick figure drawn over each dancer
+function danceVideoOn() {
+  if (scorer.video && danceVideo.srcObject !== scorer.video.srcObject) {
+    danceVideo.srcObject = scorer.video.srcObject;
+    danceVideo.play().catch(() => {});
+  }
+}
+function drawDanceOverlay(names, energies) {
+  const W = innerWidth, Hh = innerHeight;
+  if (danceCanvas.width !== W || danceCanvas.height !== Hh) { danceCanvas.width = W; danceCanvas.height = Hh; }
+  const x = danceCanvas.getContext('2d');
+  x.clearRect(0, 0, W, Hh);
+  // same "cover" fit as the video so the stick figures line up with the people
+  const vw = danceVideo.videoWidth || 1280, vh = danceVideo.videoHeight || 720;
+  const sc = Math.max(W / vw, Hh / vh), dw = vw * sc, dh = vh * sc, ox = (W - dw) / 2, oy = (Hh - dh) / 2;
+  const P = (pt) => [ox + pt.x * dw, oy + pt.y * dh];
+  pose.people.forEach((pp, i) => {
+    const col = names.length > 1 ? hex(VIRTUAL_COLORS[i % 4]) : hex(me.color);
+    const body = Math.hypot((pp[11].x - pp[12].x) * dw, (pp[11].y - pp[12].y) * dh);
+    x.lineCap = 'round'; x.lineJoin = 'round';
+    x.shadowColor = col; x.shadowBlur = 18;
+    x.strokeStyle = col; x.lineWidth = Math.max(4, body * 0.08);
+    for (const [a, b] of BONES) {
+      if (pp[a].v < 0.4 || pp[b].v < 0.4) continue;
+      const [x1, y1] = P(pp[a]), [x2, y2] = P(pp[b]);
+      x.beginPath(); x.moveTo(x1, y1); x.lineTo(x2, y2); x.stroke();
+    }
+    // neck + head
+    const neck = { x: (pp[11].x + pp[12].x) / 2, y: (pp[11].y + pp[12].y) / 2, v: Math.min(pp[11].v, pp[12].v) };
+    const [hx, hy] = P(pp[0]), [nx, ny] = P(neck);
+    const hr = Math.max(12, body * 0.38);
+    if (neck.v > 0.4 && pp[0].v > 0.4) { x.beginPath(); x.moveTo(nx, ny); x.lineTo(hx, hy + hr * 0.8); x.stroke(); }
+    if (pp[0].v > 0.4) { x.beginPath(); x.arc(hx, hy, hr, 0, Math.PI * 2); x.stroke(); }
+    // hands and feet
+    x.fillStyle = '#fff';
+    for (const k of [15, 16, 27, 28]) {
+      if (pp[k].v < 0.4) continue;
+      const [px, py] = P(pp[k]);
+      x.beginPath(); x.arc(px, py, Math.max(6, body * 0.1), 0, Math.PI * 2); x.fill();
+    }
+    x.shadowBlur = 0;
+    // name + energy bar floating above the head
+    const e = Math.round(energies[i] || 0);
+    const bw = Math.max(110, body * 1.4), bx = hx - bw / 2, by = Math.max(210, hy - hr - 46);   // stay below the top HUD
+    x.font = 'bold 18px system-ui, sans-serif'; x.textAlign = 'center';
+    x.fillStyle = '#000'; x.fillText(names[i] || '', hx + 1, by + 1); x.fillStyle = col; x.fillText(names[i] || '', hx, by);
+    x.fillStyle = 'rgba(0,0,0,0.55)'; x.fillRect(bx, by + 8, bw, 14);
+    x.fillStyle = e >= DISCO.maxEnergy ? '#ffd400' : col; x.fillRect(bx, by + 8, bw * e / 100, 14);
+    x.strokeStyle = '#fff'; x.lineWidth = 2; x.strokeRect(bx, by + 8, bw, 14);
+  });
+}
 let music = null;
 let energySent = 0, discoFacesSent = 0;
 let blownAt = 0;                       // when the dance floor exploded
@@ -1596,6 +1651,8 @@ function updateDisco(dt, t) {
   if (snap.mode === 'disco') updateVirtualAvatars(dt);
   if (!show) {
     discoEl.hud.style.display = 'none';
+    danceView.style.display = 'none';
+    danceView.classList.remove('fade');
     if (music && music.timer) music.stop();
     blownAt = 0;
     for (const [, el] of danceTags) el.remove();
@@ -1605,24 +1662,34 @@ function updateDisco(dt, t) {
   const playing = inDiscoGame();
   const local = !!D.local && D.host === me.id;
   // camera: same-camera games report when every dancer's face is visible
-  if (local && performance.now() - discoFacesSent > 300 && (scorer.status === 'ready' || scorer.status === 'error')) {
-    discoFacesSent = performance.now();
-    if (scorer.status === 'ready') scorer.detect();
-    send({ t: 'cheeseFaces', ok: scorer.status === 'error' || scorer.facesOk });
+  const count = local ? (localIds?.length || 1) : 1;
+  const hasCam = !!scorer.video || pose.fake;
+  // live video of the dancers fills the screen while we dance (fades out when the floor explodes)
+  const videoMode = playing && hasCam && ['count', 'camera', 'dance', 'boom'].includes(D.stage);
+  danceView.style.display = videoMode ? 'block' : 'none';
+  if (D.stage === 'boom') danceView.classList.add('fade');
+  if (videoMode) danceVideoOn();
+  // track bodies (stick figures) during the warm-up and the dance
+  let en = null;
+  if (playing && hasCam && (D.stage === 'camera' || D.stage === 'dance')) {
+    en = pose.status === 'ready' ? pose.update(danceVideo.readyState >= 2 ? danceVideo : scorer.video, count)
+      : meter.update(scorer.video, count, local ? scorer.faces : null);
   }
-  const finding = local && D.stage === 'camera' && scorer.status === 'ready';
-  cheeseEl.hud.style.display = finding ? 'block' : 'none';
-  cheeseEl.preview.classList.toggle('big', finding);
-  if (finding) { cheeseEl.faceMsg.textContent = scorer.facesOk ? `✅ Found all ${scorer.count} dancers — get ready!` : `Line up side by side · found ${scorer.faces.length} of ${scorer.count} dancers`; drawFaceBoxes(true, false); }
-  // measure dancing and report it
-  if (D.stage === 'dance' && playing && (scorer.video || meter.fake)) {
-    const count = local ? (localIds?.length || 1) : 1;
-    if (local && scorer.status === 'ready') scorer.detect();
-    const en = meter.update(scorer.video, count, local ? scorer.faces : null);
-    if (performance.now() - energySent > 200) {
-      energySent = performance.now();
-      send(local ? { t: 'danceEnergy', energies: en.map(Math.round) } : { t: 'danceEnergy', e: Math.round(en[0]) });
-    }
+  // same-camera games: ready once every dancer is visible
+  const seenDancers = pose.status === 'ready' ? pose.people.length : (scorer.status === 'ready' ? (scorer.detect(), scorer.faces.length) : count);
+  if (local && performance.now() - discoFacesSent > 300 && (pose.status === 'ready' || scorer.status === 'ready' || scorer.status === 'error')) {
+    discoFacesSent = performance.now();
+    send({ t: 'cheeseFaces', ok: seenDancers >= count });
+  }
+  cheeseEl.hud.style.display = 'none';
+  // report dancing
+  if (D.stage === 'dance' && en && performance.now() - energySent > 200) {
+    energySent = performance.now();
+    send(local ? { t: 'danceEnergy', energies: en.map(Math.round) } : { t: 'danceEnergy', e: Math.round(en[0]) });
+  }
+  if (videoMode) {
+    const names = local ? camGamePlayers().map(p => p.name) : [me.name];
+    drawDanceOverlay(names, en || pose.energy);
   }
   // music follows the dancing
   const avg = D.players.length ? D.players.reduce((a, p) => a + p[1], 0) / D.players.length / 100 : 0;
@@ -1651,7 +1718,9 @@ function updateDisco(dt, t) {
   discoEl.meter.style.width = `${Math.round(hype * 100)}%`;
   const slackers = D.players.filter(p => p[1] < DISCO.maxEnergy).map(p => p[4]);
   discoEl.title.textContent = D.stage === 'camera' || D.stage === 'count' ? '🪩 GET READY TO DANCE 🪩' : D.stage === 'boom' ? '💥 BOOM! 💥' : hype > 0.66 ? '🔥 KEEP GOING!! 🔥' : '🪩 JUST DANCE! 🪩';
-  discoEl.hint.textContent = D.stage !== 'dance' ? '' : slackers.length ? `Dance harder: ${slackers.join(', ')}` : 'EVERYONE IS MAX DANCING — the party meter is filling!';
+  discoEl.hint.textContent = D.stage === 'camera' && local ? (seenDancers >= count ? `✅ Found all ${count} dancers — get ready!` : `Step back so the camera can see your whole body · found ${seenDancers} of ${count} dancers`)
+    : D.stage === 'camera' ? 'Step back so the camera can see your whole body'
+    : D.stage !== 'dance' ? '' : slackers.length ? `Dance harder: ${slackers.join(', ')}` : 'EVERYONE IS MAX DANCING — the party meter is filling!';
   const spotsList = DISCO.spots;
   const seen = new Set();
   D.players.forEach(([id, energy, score, , name], i) => {
@@ -1662,9 +1731,15 @@ function updateDisco(dt, t) {
       el.innerHTML = `<div class="nm"></div><div class="bar"><div></div></div><div class="score"></div>`;
       discoEl.tags.appendChild(el); danceTags.set(id, el);
     }
-    const p = new THREE.Vector3(spotsList[i].x, -0.15, spotsList[i].z).project(camera);
-    el.style.left = `${(p.x * 0.5 + 0.5) * innerWidth}px`;
-    el.style.top = `${(-p.y * 0.5 + 0.5) * innerHeight}px`;
+    if (videoMode) {
+      // over the live video: a row of score bars along the bottom
+      el.style.left = `${((i + 0.5) / D.players.length) * innerWidth}px`;
+      el.style.top = `${innerHeight - 92}px`;
+    } else {
+      const p = new THREE.Vector3(spotsList[i].x, -0.15, spotsList[i].z).project(camera);
+      el.style.left = `${(p.x * 0.5 + 0.5) * innerWidth}px`;
+      el.style.top = `${(-p.y * 0.5 + 0.5) * innerHeight}px`;
+    }
     el.style.display = blownAt ? 'none' : 'block';
     el.querySelector('.nm').textContent = name + (id === me.id ? ' (you)' : '');
     el.querySelector('.bar > div').style.width = `${energy}%`;
@@ -2320,7 +2395,7 @@ function updateHud() {
 
   // name tags over other players
   for (const [id, a] of avatars) {
-    if (id === me.id || a.cloaked) { a.label.style.display = 'none'; continue; }
+    if (id === me.id || a.cloaked || danceView.style.display === 'block') { a.label.style.display = 'none'; continue; }
     const p = a.body.root.position.clone().add(new THREE.Vector3(0, 2.25, 0));
     const v = p.project(camera);
     if (v.z > 1 || Math.abs(v.x) > 1.2 || Math.abs(v.y) > 1.2) { a.label.style.display = 'none'; continue; }
@@ -2340,6 +2415,7 @@ function updateHud() {
   if (onLava) ui.vignette.style.boxShadow = `inset 0 0 ${150 + Math.sin(clock.t * 10) * 30}px rgba(255,90,0,0.6)`;
   else if (ui.vignette.dataset.lava) ui.vignette.style.boxShadow = 'inset 0 0 160px rgba(255,0,0,0)';
   ui.vignette.dataset.lava = onLava ? '1' : '';
+  ui.crosshair.style.display = inCamGame() && me.cheeseSpot ? 'none' : '';
   hitMarkerT = Math.max(0, hitMarkerT - 1 / 60);
   ui.crosshair.classList.toggle('hit', hitMarkerT > 0);
 }

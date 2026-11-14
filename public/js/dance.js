@@ -165,3 +165,115 @@ export class DiscoMusic {
     this.stop();
   }
 }
+
+// Body tracking for Dance Dance Disco (Google MediaPipe Pose Landmarker, up to 4 people).
+// Finds head, hands, elbows, hips, knees and feet, and turns how fast they move into dance energy.
+// Harder than plain camera motion: only real arm/leg/head movement counts, measured relative to
+// each dancer's body size, so standing close to the camera or wiggling in place doesn't max it out.
+const POSE_MODEL_URLS = [
+  '/models/pose_landmarker_lite.task',
+  'https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task',
+];
+// points that count toward dancing: nose, elbows, wrists, knees, ankles
+const DANCE_POINTS = [0, 13, 14, 15, 16, 25, 26, 27, 28];
+export const BONES = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23], [12, 24], [23, 24], [23, 25], [25, 27], [24, 26], [26, 28]];
+
+export class PoseTracker {
+  constructor() {
+    this.status = 'idle';          // idle | loading | ready | error
+    this.people = [];              // left to right: array of 33 points {x (mirrored), y, v}
+    this.prev = [];
+    this.energy = [];
+    this.last = 0;
+    this.fake = new URLSearchParams(location.search).has('fakeface');
+    this.fakeT = 0;
+  }
+
+  async load() {
+    if (this.status !== 'idle') return;
+    if (this.fake) { this.status = 'ready'; return; }
+    this.status = 'loading';
+    try {
+      const { FilesetResolver, PoseLandmarker } = await import('/vendor/mediapipe/vision_bundle.mjs');
+      const fileset = await FilesetResolver.forVisionTasks('/vendor/mediapipe/wasm');
+      for (const url of POSE_MODEL_URLS) {
+        for (const delegate of ['GPU', 'CPU']) {
+          try {
+            this.landmarker = await PoseLandmarker.createFromOptions(fileset, {
+              baseOptions: { modelAssetPath: url, delegate }, runningMode: 'VIDEO', numPoses: 4,
+            });
+            break;
+          } catch (e) { /* try the next option */ }
+        }
+        if (this.landmarker) break;
+      }
+      this.status = this.landmarker ? 'ready' : 'error';
+    } catch (e) {
+      console.warn('Body tracking unavailable:', e);
+      this.status = 'error';
+    }
+  }
+
+  // Track bodies and return dance energy (0-100) for each of `count` dancers, left to right.
+  update(video, count) {
+    const t = performance.now();
+    if (this.energy.length !== count) { this.energy = Array(count).fill(0); this.prev = []; }
+    if (t - this.last < 70) return this.energy;
+    const dt = Math.max(0.03, (t - this.last) / 1000);
+    this.last = t;
+    if (this.fake) {
+      // test mode: simulated stick figures, and energy that ramps up to max dancing
+      this.fakePeople(count, dt);
+      for (let i = 0; i < count; i++) {
+        const target = Math.min(100, 40 + this.fakeT * 6 + Math.sin(this.fakeT * 2 + i) * 8);
+        this.energy[i] += (target - this.energy[i]) * 0.3;
+      }
+      return this.energy;
+    }
+    else if (this.status === 'ready' && video && video.readyState >= 2) {
+      const res = this.landmarker.detectForVideo(video, t);
+      const people = (res.landmarks || []).map(lm => lm.map(p => ({ x: 1 - p.x, y: p.y, v: p.visibility ?? 1 })));
+      const size = (pp) => Math.hypot(pp[11].x - pp[12].x, pp[11].y - pp[12].y);
+      people.sort((a, b) => size(b) - size(a));                        // closest people first
+      this.people = people.slice(0, count).sort((a, b) => (a[23].x + a[24].x) - (b[23].x + b[24].x));  // then left to right
+    } else { this.people = []; }
+    for (let i = 0; i < count; i++) {
+      const p = this.people[i], q = this.prev[i];
+      let e = 0;
+      if (p && q) {
+        const body = Math.max(0.04, Math.hypot(p[11].x - p[12].x, p[11].y - p[12].y));   // shoulder width
+        let sum = 0, n = 0;
+        for (const k of DANCE_POINTS) {
+          if (p[k].v < 0.5 || q[k].v < 0.5) continue;
+          sum += Math.hypot(p[k].x - q[k].x, p[k].y - q[k].y); n++;
+        }
+        const speed = n ? sum / n / body / dt : 0;      // body-widths per second
+        e = Math.max(0, Math.min(100, ((speed - 0.5) / 3.2) * 100));
+      }
+      this.energy[i] = this.energy[i] * 0.7 + e * 0.3;
+    }
+    this.prev = this.people.map(p => p.map(pt => ({ ...pt })));
+    return this.energy;
+  }
+
+  // simulated dancers for testing (?fakeface=1): skeletons that dance harder over time
+  fakePeople(count, dt) {
+    this.fakeT += dt;
+    const amp = Math.min(1, 0.3 + this.fakeT / 14);
+    this.people = Array.from({ length: count }, (_, i) => {
+      const cx = (i + 0.5) / count, ph = this.fakeT * 6 + i;
+      const s = Math.sin(ph) * amp, c = Math.cos(ph) * amp;
+      const pts = Array.from({ length: 33 }, () => ({ x: cx, y: 0.5, v: 1 }));
+      const set = (k, x, y) => { pts[k] = { x, y, v: 1 }; };
+      const w = 0.12 / Math.max(1, count / 2), bob = Math.abs(s) * 0.02;
+      set(0, cx + s * 0.02, 0.22 + bob);
+      set(11, cx - w / 2, 0.34 + bob); set(12, cx + w / 2, 0.34 + bob);
+      set(13, cx - w, 0.34 - s * 0.12 + bob); set(14, cx + w, 0.34 + s * 0.12 + bob);
+      set(15, cx - w * 1.2, 0.22 - s * 0.2 + bob); set(16, cx + w * 1.2, 0.22 + s * 0.2 + bob);
+      set(23, cx - w / 3, 0.6 + bob); set(24, cx + w / 3, 0.6 + bob);
+      set(25, cx - w / 2 - c * 0.04, 0.75); set(26, cx + w / 2 + c * 0.04, 0.75 - Math.max(0, s) * 0.05);
+      set(27, cx - w / 2 - c * 0.05, 0.9); set(28, cx + w / 2 + c * 0.05, 0.9 - Math.max(0, s) * 0.06);
+      return pts;
+    });
+  }
+}
