@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { WEAPONS, ARENA, FALL_MS, USES_PER_WEAPON, MAX_HEALTH, usesOf } from '/shared/weapons.js';
+import { WEAPONS, ARENA, FALL_MS, USES_PER_WEAPON, MAX_HEALTH, usesOf, wallBox, wallHeightAt } from '/shared/weapons.js';
 import { WireBody } from './body.js';
 import { buildWeaponMesh, animateWeaponMesh } from './weaponMeshes.js';
 
@@ -12,7 +12,7 @@ document.body.prepend(renderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x05060a);
-scene.fog = new THREE.Fog(0x05060a, 40, 110);
+scene.fog = new THREE.Fog(0x05060a, 50, 130);
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.05, 300);
 
 addEventListener('resize', () => {
@@ -24,7 +24,8 @@ addEventListener('resize', () => {
 // lights
 scene.add(new THREE.HemisphereLight(0x8fb8ff, 0x1a1030, 0.9));
 const sun = new THREE.DirectionalLight(0xffffff, 1.4);
-sun.position.set(12, 30, 8);
+sun.position.set(12, 60, 8);
+sun.shadow.camera.far = 150;
 sun.castShadow = true;
 sun.shadow.camera.left = sun.shadow.camera.bottom = -35;
 sun.shadow.camera.right = sun.shadow.camera.top = 35;
@@ -79,6 +80,95 @@ for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) {
   hatch.position.set(i * 11, H - 0.05, j * 11);
   scene.add(hatch);
   hatches.push(hatch);
+}
+
+// ---------- maze walls ----------
+const wallSolids = [];
+const camRay = new THREE.Raycaster();
+const wallMeshes = ARENA.walls.map((w, i) => {
+  const b = wallBox(w);
+  const sx = b.x1 - b.x0, sz = b.z1 - b.z0;
+  const g = new THREE.Group();
+  g.position.set(w.x, 0, w.z);
+  const body = new THREE.Group();          // scaled on y as the wall rises
+  const geo = new THREE.BoxGeometry(sx, 1, sz);
+  geo.translate(0, 0.5, 0);
+  const solid = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: 0x141a2e, emissive: 0x0a1030, roughness: 0.6, metalness: 0.3 }));
+  solid.castShadow = true; solid.receiveShadow = true;
+  const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo), new THREE.LineBasicMaterial({ color: 0x00e5ff }));
+  // horizontal neon stripes so the wall reads well from a distance
+  const stripes = new THREE.Group();
+  for (let k = 1; k < 5; k++) {
+    const st = new THREE.Mesh(new THREE.BoxGeometry(sx + 0.02, 0.04, sz + 0.02), new THREE.MeshBasicMaterial({ color: 0xff3df2 }));
+    st.position.y = k / 5;
+    stripes.add(st);
+  }
+  body.add(solid, edges, stripes);
+  wallSolids.push(solid);
+  body.scale.y = 0.001;
+  body.visible = false;
+  // glowing slot in the floor so you can see where walls will come up
+  const slot = new THREE.Mesh(new THREE.PlaneGeometry(sx + 0.3, sz + 0.3),
+    new THREE.MeshBasicMaterial({ color: 0xff3df2, transparent: true, opacity: 0.25, depthWrite: false }));
+  slot.rotation.x = -Math.PI / 2;
+  slot.position.y = 0.02;
+  g.add(body, slot);
+  scene.add(g);
+  return { body, slot, stripes, height: 0, up: false, age: 99999, recvAt: performance.now() };
+});
+function wallHeightNow(i) {
+  const wm = wallMeshes[i];
+  return wallHeightAt(wm.up, wm.age + (performance.now() - wm.recvAt));
+}
+function updateWalls(t) {
+  wallMeshes.forEach((wm, i) => {
+    const h = wallHeightNow(i);
+    wm.height = h;
+    wm.body.visible = h > 0.02;
+    wm.body.scale.y = Math.max(0.001, h);
+    const moving = wm.age + (performance.now() - wm.recvAt) < ARENA.wallRiseMs;
+    wm.slot.material.opacity = moving ? 0.5 + Math.sin(t * 20) * 0.3 : (h > 0.1 ? 0.08 : 0.22);
+    wm.slot.material.color.setHex(moving && wm.up ? 0xff3030 : 0xff3df2);
+  });
+}
+
+// ---------- corner jump pads ----------
+const jumpPadMeshes = ARENA.jumpPads.map((jp) => {
+  const g = new THREE.Group();
+  g.position.set(jp.x, 0, jp.z);
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(jp.r + 0.3, jp.r + 0.5, 0.25, 6),
+    new THREE.MeshStandardMaterial({ color: 0x222833, metalness: 0.7, roughness: 0.3 }));
+  base.position.y = 0.125;
+  const top = new THREE.Mesh(new THREE.CylinderGeometry(jp.r, jp.r, 0.08, 6),
+    new THREE.MeshStandardMaterial({ color: 0x7dff3d, emissive: 0x7dff3d, emissiveIntensity: 1 }));
+  top.position.y = 0.28;
+  g.add(base, top);
+  // stacked chevrons pointing up
+  const chevrons = [];
+  for (let k = 0; k < 4; k++) {
+    const c = new THREE.Mesh(new THREE.ConeGeometry(0.9, 0.5, 6, 1, true),
+      new THREE.MeshBasicMaterial({ color: 0x7dff3d, transparent: true, opacity: 0.5, wireframe: true }));
+    c.position.y = 0.6 + k * 0.9;
+    g.add(c);
+    chevrons.push(c);
+  }
+  const light = new THREE.PointLight(0x7dff3d, 6, 10);
+  light.position.y = 1.5;
+  g.add(light);
+  scene.add(g);
+  return { g, top, chevrons, light, flash: 0 };
+});
+function updateJumpPads(dt, t) {
+  for (const jp of jumpPadMeshes) {
+    jp.chevrons.forEach((c, k) => {
+      c.position.y = 0.6 + ((k * 0.9 + t * 2.5) % 3.6);
+      c.material.opacity = 0.6 * (1 - (c.position.y - 0.6) / 3.6);
+      c.rotation.y = t;
+    });
+    jp.flash = Math.max(0, jp.flash - dt * 2);
+    jp.top.material.emissiveIntensity = 1 + jp.flash * 4;
+    jp.light.intensity = 6 + jp.flash * 30;
+  }
 }
 
 // ---------- pressure pads ----------
@@ -207,6 +297,14 @@ function removeAvatar(id) {
 
 function applySnapshot(s) {
   snap = s;
+  if (s.walls) {
+    const nowT = performance.now();
+    s.walls.forEach(([up, age], i) => {
+      const wm = wallMeshes[i];
+      if (!wm) return;
+      wm.up = !!up; wm.age = age; wm.recvAt = nowT;
+    });
+  }
   const seen = new Set();
   for (const p of s.players) {
     seen.add(p.id);
@@ -813,6 +911,33 @@ let shake = 0;
 let hatchFlash = 0;
 const clock = { t: 0 };
 
+// Push the player out of any raised wall they're running into (unless they're above it).
+const PLAYER_R = 0.4;
+function collideWalls() {
+  ARENA.walls.forEach((w, i) => {
+    const h = wallMeshes[i].height;
+    if (h < 0.15 || me.pos.y >= h - 0.3) return;
+    const b = wallBox(w, PLAYER_R);
+    const p = me.pos;
+    if (p.x <= b.x0 || p.x >= b.x1 || p.z <= b.z0 || p.z >= b.z1) return;
+    // push out along the shallowest side
+    const pushes = [[b.x0 - p.x, 0], [b.x1 - p.x, 0], [0, b.z0 - p.z], [0, b.z1 - p.z]];
+    pushes.sort((a, c) => Math.abs(a[0] + a[1]) - Math.abs(c[0] + c[1]));
+    p.x += pushes[0][0]; p.z += pushes[0][1];
+  });
+}
+// Floor height under the player: 0, or the top of a wall they're standing on.
+function groundHeight(x, z, y) {
+  let g = 0;
+  ARENA.walls.forEach((w, i) => {
+    const h = wallMeshes[i].height;
+    if (h < 0.15 || y < h - 0.35) return;
+    const b = wallBox(w, 0.15);
+    if (x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1) g = Math.max(g, h);
+  });
+  return g;
+}
+
 function updateLocal(dt) {
   const downed = me.hp <= 0 && (snap.phase === 'fight' || snap.phase === 'over') && snap.fighters.includes(me.id);
   const fwd = new THREE.Vector3(-Math.sin(me.yaw), 0, -Math.cos(me.yaw));
@@ -839,19 +964,43 @@ function updateLocal(dt) {
   }
   me.moving = move.lengthSq() > 0.0025;
   if (me.moving) {
-    const speed = sprint ? 11 : 6.5;
+    // after a jump pad launch you only get a little steering until you land
+    const speed = (sprint ? 11 : 6.5) * (me.padAir ? ARENA.airControl : 1);
     if (move.lengthSq() > 1) move.normalize();
     move.multiplyScalar(speed * dt);
     me.pos.add(move);
   }
-  if (((locked && keys.Space) || touch.jump) && me.onGround && !downed) { me.velY = 8; me.onGround = false; }
+  if (me.padAir && me.padDrift) me.pos.addScaledVector(me.padDrift, dt);
+  collideWalls();
+  if (((locked && keys.Space) || touch.jump) && me.onGround && !downed) { me.velY = ARENA.jumpSpeed; me.onGround = false; tone(300, 0.1, 'triangle', 0.05, 200); }
   touch.jump = false;
   if (touch.attackHeld) attack(); // hold ATTACK to keep swinging/firing
   if (!me.dash) {
-    me.velY -= 22 * dt;
+    me.velY -= ARENA.gravity * dt;
     me.pos.y += me.velY * dt;
   }
-  if (me.pos.y <= 0) { me.pos.y = 0; me.velY = 0; me.onGround = true; }
+  const ground = groundHeight(me.pos.x, me.pos.z, me.pos.y);
+  if (me.pos.y <= ground) {
+    if (me.padAir && me.velY < -20) { shake = 0.35; tone(80, 0.25, 'sine', 0.15, -30); }
+    me.pos.y = ground; me.velY = 0; me.onGround = true; me.padAir = false;
+  } else if (me.pos.y > ground + 0.05) me.onGround = false;
+  if (me.pos.y > H - 2) { me.pos.y = H - 2; me.velY = Math.min(0, me.velY); }
+  // corner jump pads
+  if (me.onGround && !downed && !me.dash) {
+    jumpPadMeshes.forEach((jp, i) => {
+      const pad = ARENA.jumpPads[i];
+      if (Math.hypot(me.pos.x - pad.x, me.pos.z - pad.z) < pad.r && me.pos.y < 0.5) {
+        me.velY = ARENA.jumpPadSpeed;
+        me.onGround = false;
+        me.padAir = true;
+        // gentle drift toward the middle of the room so you fly out over the arena
+        me.padDrift = new THREE.Vector3(-pad.x, 0, -pad.z).normalize().multiplyScalar(4.5);
+        jp.flash = 1;
+        addBurst(new THREE.Vector3(pad.x, 0.5, pad.z), 0x7dff3d, 30, 10, 0.12, 0.8);
+        tone(200, 0.6, 'sine', 0.15, 900);
+      }
+    });
+  }
   const lim = HALF - 0.6;
   me.pos.x = THREE.MathUtils.clamp(me.pos.x, -lim, lim);
   me.pos.z = THREE.MathUtils.clamp(me.pos.z, -lim, lim);
@@ -959,6 +1108,14 @@ function updateCamera(dt) {
   pos.x = THREE.MathUtils.clamp(pos.x, -lim, lim);
   pos.z = THREE.MathUtils.clamp(pos.z, -lim, lim);
   pos.y = THREE.MathUtils.clamp(pos.y, 0.3, H - 0.3);
+  // don't let a wall get between the camera and your player
+  const toCam = pos.clone().sub(target);
+  const camDist = toCam.length();
+  camRay.set(target, toCam.normalize());
+  camRay.far = camDist;
+  const visibleWalls = wallSolids.filter(m => m.parent.visible);
+  const hit = visibleWalls.length ? camRay.intersectObjects(visibleWalls, false)[0] : null;
+  if (hit) pos.copy(target).addScaledVector(toCam, Math.max(0.6, hit.distance - 0.3));
   if (shake > 0) {
     pos.add(new THREE.Vector3((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake));
     shake = Math.max(0, shake - dt * 2);
@@ -1007,7 +1164,9 @@ function updateHud() {
     ui.fighters.innerHTML = snap.fighters.map(id => {
       const p = snap.players.find(x => x.id === id);
       if (!p) return '';
-      return `<div class="fbar panel"><div class="label"><span style="color:${hex(p.color)};font-weight:700">${p.name}${id === me.id ? ' (you)' : ''}</span><span>${Math.ceil(p.hp)}</span></div>
+      const ml = p.muscle || 0;
+      const flex = ml > 0 ? ` <span style="color:${ml >= 5 ? '#ffd23c' : '#9fd8ff'}">💪${ml}${ml >= 5 ? ' MAX' : ''}</span>` : '';
+      return `<div class="fbar panel"><div class="label"><span style="color:${hex(p.color)};font-weight:700">${p.name}${id === me.id ? ' (you)' : ''}${flex}</span><span>${Math.ceil(p.hp)}</span></div>
         <div class="bar"><div style="width:${p.hp}%;background:${hpColor(p.hp)}"></div></div></div>`;
     }).join('');
   } else ui.fighters.style.display = 'none';
@@ -1043,6 +1202,8 @@ function frame() {
   updateRemotes(dt);
   updateWeapons(dt, clock.t);
   updatePads(dt, clock.t);
+  updateWalls(clock.t);
+  updateJumpPads(dt, clock.t);
   updateFx(dt);
   updateHoming();
   updateCamera(dt);
@@ -1055,4 +1216,4 @@ connect();
 frame();
 
 // expose a little for debugging / automated tests
-window.__dp = { me, snap: () => snap, avatars, floorWeapons, send, scene, camera, THREE };
+window.__dp = { me, snap: () => snap, avatars, floorWeapons, send, scene, camera, THREE, test: { updateLocal, updateWalls, touch, wallMeshes } };

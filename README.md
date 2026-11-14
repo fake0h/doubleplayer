@@ -4,6 +4,12 @@ A 2-player 3D wireframe arena brawler that runs in the browser. **(Touchscreen c
 
 Everyone who opens the site appears as a glowing wireframe body in a big neon room. The room has two pressure pads. When two players stand on them at the same time, a **3, 2, 1** countdown starts. Then weapons rain down from the ceiling, and the two players fight until one of them hits 0 health.
 
+## The arena
+
+- **Maze walls** rise out of the floor and sink back down. Every 7 seconds a new set comes up, making a fresh maze. Raised walls are **cover**: shots, swings and poop all stop at the wall. You can also land on top of a wall, and you'll drop back to the floor when it sinks. A glowing slot in the floor shows where each wall lives, and it flashes red while a wall is rising.
+- **Jump pads** sit in two corners. Step on one and it flings you about 29m into the air, out over the arena. You get only a little steering on the way down.
+- **Jumping** is high: about 4.4m, enough to see over the action, but not over a raised wall.
+
 ## Rules
 
 - Each player starts with **100 health**.

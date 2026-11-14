@@ -92,14 +92,76 @@ export function randomSpecialType(rng = Math.random) {
 // Arena layout (shared so client and server agree)
 export const ARENA = {
   size: 60,          // square room, -30..30 on x and z
-  height: 22,
+  height: 40,        // tall enough for the jump pads to fling you sky-high
   pads: [
     { x: -8, z: 0, r: 2.2 },
     { x: 8,  z: 0, r: 2.2 },
   ],
-  dropHeight: 20,
+  dropHeight: 36,
   gravity: 22,
+  jumpSpeed: 13.9,   // 3x the original jump height (was 8)
+  // Corner jump pads: launch you way up, with only a little steering on the way down
+  jumpPads: [
+    { x: -25, z: -25, r: 1.8 },
+    { x: 25,  z: 25,  r: 1.8 },
+  ],
+  jumpPadSpeed: 36,  // ~29m up
+  airControl: 0.35,  // steering strength while falling from a jump pad (1 = full)
+  // Maze walls that rise out of / sink into the floor. Axis-aligned boxes.
+  // ax: 'x' = runs along x, 'z' = runs along z. len = length, wall is 0.8 thick, 5 tall.
+  wallHeight: 5,
+  wallThickness: 0.8,
+  wallRiseMs: 1500,
+  wallCycleMs: 7000,
+  walls: [
+    { x: 0,   z: -8,  len: 8, ax: 'x' }, { x: 0,   z: 8,   len: 8, ax: 'x' },
+    { x: -16, z: -4,  len: 8, ax: 'z' }, { x: 16,  z: 4,   len: 8, ax: 'z' },
+    { x: -16, z: 14,  len: 8, ax: 'x' }, { x: 16,  z: -14, len: 8, ax: 'x' },
+    { x: -6,  z: 18,  len: 8, ax: 'z' }, { x: 6,   z: -18, len: 8, ax: 'z' },
+    { x: -22, z: 4,   len: 7, ax: 'x' }, { x: 22,  z: -4,  len: 7, ax: 'x' },
+    { x: 0,   z: 24,  len: 8, ax: 'x' }, { x: 0,   z: -24, len: 8, ax: 'x' },
+    { x: -24, z: 14,  len: 6, ax: 'z' }, { x: 24,  z: -14, len: 6, ax: 'z' },
+    { x: -9,  z: -15, len: 6, ax: 'x' }, { x: 9,   z: 15,  len: 6, ax: 'x' },
+    { x: 14,  z: 22,  len: 6, ax: 'z' }, { x: -14, z: -22, len: 6, ax: 'z' },
+  ],
 };
+
+// Footprint of a wall as an axis-aligned box on the floor
+export function wallBox(w, pad = 0) {
+  const hl = w.len / 2 + pad, ht = ARENA.wallThickness / 2 + pad;
+  return w.ax === 'x'
+    ? { x0: w.x - hl, x1: w.x + hl, z0: w.z - ht, z1: w.z + ht }
+    : { x0: w.x - ht, x1: w.x + ht, z0: w.z - hl, z1: w.z + hl };
+}
+
+// Current height of a wall given whether it's going up and how long ago it changed
+export function wallHeightAt(up, ageMs) {
+  const k = Math.max(0, Math.min(1, ageMs / ARENA.wallRiseMs));
+  const e = k * k * (3 - 2 * k); // smooth ease
+  return ARENA.wallHeight * (up ? e : 1 - e);
+}
+
+// Segment a->b vs wall boxes at their current heights. Returns hit fraction (0..1) or null.
+export function segmentHitsWalls(a, b, heights) {
+  let best = null;
+  ARENA.walls.forEach((w, i) => {
+    const h = heights[i];
+    if (h < 0.2) return;
+    const bx = wallBox(w);
+    const min = [bx.x0, 0, bx.z0], max = [bx.x1, h, bx.z1];
+    let t0 = 0, t1 = 1;
+    for (let k = 0; k < 3; k++) {
+      const d = b[k] - a[k];
+      if (Math.abs(d) < 1e-9) { if (a[k] < min[k] || a[k] > max[k]) return; continue; }
+      let ta = (min[k] - a[k]) / d, tb = (max[k] - a[k]) / d;
+      if (ta > tb) [ta, tb] = [tb, ta];
+      t0 = Math.max(t0, ta); t1 = Math.min(t1, tb);
+      if (t0 > t1) return;
+    }
+    if (best === null || t0 < best) best = t0;
+  });
+  return best;
+}
 
 // Time for a weapon to fall from the ceiling to the floor (ms)
 export const FALL_MS = Math.sqrt((2 * (ARENA.dropHeight - 0.3)) / ARENA.gravity) * 1000;

@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
   WEAPONS, USES_PER_WEAPON, MAX_HEALTH, ARENA, FALL_MS, randomWeaponType, HIT_TUNING,
-  randomSpecialType, usesOf,
+  randomSpecialType, usesOf, wallBox, wallHeightAt, segmentHitsWalls,
 } from './shared/weapons.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -35,7 +35,13 @@ const server = http.createServer((req, res) => {
     if (!file.startsWith(dir)) break; // path traversal guard
     fs.readFile(file, (err, data) => {
       if (err) { res.writeHead(404); return res.end('Not found'); }
-      res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+      // no-cache: browsers must check for a new version every time, so every player
+      // always runs the latest game code after a deploy (old cached copies caused
+      // features like the muscle upgrades to be missing on some screens).
+      res.writeHead(200, {
+        'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
+        'Cache-Control': prefix === '/vendor/three/' ? 'public, max-age=86400' : 'no-cache',
+      });
       res.end(data);
     });
     return;
@@ -52,6 +58,34 @@ const players = new Map();   // id -> player
 const weapons = new Map();   // id -> weapon on the floor / falling
 let nextId = 1;
 let nextWeaponId = 1;
+
+// ---------- maze walls ----------
+// Each wall rises or sinks; every cycle a new random set goes up to form a fresh maze.
+const walls = ARENA.walls.map(() => ({ up: false, changedAt: 0 }));
+function wallHeights() {
+  const t = now();
+  return walls.map(w => wallHeightAt(w.up, t - w.changedAt));
+}
+function shuffleWalls() {
+  const t = now();
+  walls.forEach((w) => {
+    const wantUp = Math.random() < 0.55;
+    if (wantUp !== w.up) {
+      // start from wherever it currently is so a half-risen wall doesn't jump
+      const cur = wallHeightAt(w.up, t - w.changedAt) / ARENA.wallHeight;
+      const k = wantUp ? cur : 1 - cur;               // progress already made in the new direction
+      const kInv = Math.acos(1 - 2 * k) / Math.PI;    // undo the smooth ease approximately
+      w.up = wantUp;
+      w.changedAt = t - kInv * ARENA.wallRiseMs;
+    }
+  });
+}
+shuffleWalls();
+setInterval(shuffleWalls, ARENA.wallCycleMs);
+
+function insideAnyWall(x, z, margin) {
+  return ARENA.walls.some(w => { const b = wallBox(w, margin); return x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1; });
+}
 
 const game = {
   phase: 'lobby',     // lobby | countdown | fight | over
@@ -120,7 +154,9 @@ function spawnWeapon(forceType) {
   do {
     x = (Math.random() * 2 - 1) * (HALF - 3);
     z = (Math.random() * 2 - 1) * (HALF - 3);
-  } while (ARENA.pads.some(p => Math.hypot(x - p.x, z - p.z) < 3));
+  } while (ARENA.pads.some(p => Math.hypot(x - p.x, z - p.z) < 3)
+        || ARENA.jumpPads.some(p => Math.hypot(x - p.x, z - p.z) < 3)
+        || insideAnyWall(x, z, 1.2));
   const specialsOut = [...weapons.values()].filter(w => WEAPONS[w.type].special).length;
   let type = forceType;
   if (!type) type = (specialsOut < 2 && Math.random() < specialChance()) ? randomSpecialType() : randomWeaponType();
@@ -260,13 +296,21 @@ function handleAttack(pl, msg) {
       const tolerance = def.cone / 2 + Math.atan2(HIT_TUNING.bodyRadius, Math.max(dist, 0.1)) * 180 / Math.PI;
       if (dist <= def.range + HIT_TUNING.bodyRadius && angleBetween(dir, to) <= tolerance) hitId = opp.id;
     }
+    // walls give cover: anything between you and the target blocks the hit
+    if (hitId && flatDist >= HIT_TUNING.bodyRadius) {
+      const blockT = segmentHitsWalls(origin, chest, wallHeights());
+      if (blockT !== null) {
+        hitId = null;
+        impact = origin.map((v, k) => v + (chest[k] - v) * blockT);
+      }
+    }
     if (hitId) impact = chest;
     // rocket splash: near-misses still hurt
     if (!hitId && def.splash) {
       const along = Math.max(0, to[0] * dir[0] + to[1] * dir[1] + to[2] * dir[2]);
       const closest = [origin[0] + dir[0] * along, origin[1] + dir[1] * along, origin[2] + dir[2] * along];
       const miss = Math.hypot(chest[0] - closest[0], chest[1] - closest[1], chest[2] - closest[2]);
-      if (along <= def.range && miss <= def.splash) {
+      if (along <= def.range && miss <= def.splash && segmentHitsWalls(origin, closest, wallHeights()) === null) {
         hitId = opp.id;
         impact = closest;
         const type = pl.weapon.type;
@@ -279,6 +323,11 @@ function handleAttack(pl, msg) {
     }
   }
 
+  if (!impact && def.kind !== 'melee') {
+    const far = origin.map((v, k) => v + dir[k] * def.range);
+    const t = segmentHitsWalls(origin, far, wallHeights());
+    if (t !== null) impact = origin.map((v, k) => v + (far[k] - v) * t);
+  }
   broadcast({ t: 'fx', kind: 'attack', from: pl.id, weapon: pl.weapon.type, origin, dir, hit: hitId, impact });
   const type = pl.weapon.type;
   pl.weapon.uses -= 1;
@@ -352,7 +401,8 @@ function specialAttack(pl, opp, def, origin, dir) {
     const to = [chest[0] - origin[0], chest[1] - origin[1], chest[2] - origin[2]];
     const dist = Math.hypot(...to);
     const tolerance = def.cone + Math.atan2(HIT_TUNING.bodyRadius, Math.max(dist, 0.1)) * 180 / Math.PI;
-    const hit = (Math.hypot(to[0], to[2]) < HIT_TUNING.bodyRadius) || (dist <= def.range && angleBetween(dir, to) <= tolerance);
+    const hit = (Math.hypot(to[0], to[2]) < HIT_TUNING.bodyRadius)
+      || (dist <= def.range && angleBetween(dir, to) <= tolerance && segmentHitsWalls(origin, chest, wallHeights()) === null);
     broadcast({ t: 'fx', kind: 'attack', from: pl.id, weapon: type, origin, dir: hit ? to.map(v => v / dist) : dir, hit: hit ? opp.id : null, impact: hit ? chest : null });
     if (hit) {
       const TICKS = 5;
@@ -464,6 +514,7 @@ setInterval(() => {
     countdown: game.phase === 'countdown' ? Math.max(0, game.phaseEndsAt - t) : 0,
     fighters: game.fighters,
     pads: padOccupants().map(o => o.length > 0),
+    walls: walls.map(w => [w.up ? 1 : 0, t - w.changedAt]),
     players: [...players.values()].map(pl => ({
       id: pl.id, name: pl.name, color: pl.color, p: pl.p, yaw: pl.yaw, pitch: pl.pitch,
       streak: pl.streak, muscle: Math.min(5, pl.streak),
