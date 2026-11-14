@@ -432,6 +432,13 @@ function makePad(p, color) {
 }
 const pads = ARENA.pads.map((p) => makePad(p, PVP_GREEN));                  // 4xPVP corner (southwest)
 const cheesePads = ARENA.cheesePads.map((p) => makePad(p, CHEESE_YELLOW));  // Say Cheese corner (northeast)
+const NEXT_BLUE = 0x2a8cff, GRAY = 0x5a5f6b;
+const nextPads = ARENA.nextPads.map((p) => makePad(p, NEXT_BLUE));          // next game: middle of the east wall
+const grayPads = ARENA.grayPads.map((p) => makePad(p, GRAY));               // unused for now
+for (const g of grayPads) { g.plateMat.emissiveIntensity = 0.05; g.ring.material.color.setHex(0x3a3f4a); }
+const nextFloor = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), new THREE.MeshBasicMaterial({ color: NEXT_BLUE, transparent: true, opacity: 0.06, depthWrite: false }));
+nextFloor.rotation.x = -Math.PI / 2; nextFloor.position.set(21, 0.015, 0); scene.add(nextFloor);
+const onPadList = (list, x, z, y) => list.some(p => Math.hypot(x - p.x, z - p.z) <= p.r && y < 1);
 function onCheesePad(x, z, y) {
   return ARENA.cheesePads.some(p => Math.hypot(x - p.x, z - p.z) <= p.r && y < 1);
 }
@@ -1956,21 +1963,24 @@ function updatePads(dt, t) {
     pad.beam.material.opacity = counting ? 0.12 + Math.sin(t * 12) * 0.06 : pad.pressed * 0.05;
     pad.ring.scale.setScalar(1 + (on ? Math.sin(t * 6) * 0.04 : 0));
   });
-  // Say Cheese pads light up when someone stands on them (game coming soon)
-  cheesePads.forEach((pad, i) => {
-    const p = ARENA.cheesePads[i];
+  // Say Cheese, next-game and gray pads light up when someone stands on them
+  const animatePads = (meshes, list, glow) => meshes.forEach((pad, i) => {
+    const p = list[i];
     const on = snap.players.some(pl => Math.hypot(pl.p[0] - p.x, pl.p[2] - p.z) <= p.r && pl.p[1] < 1);
     pad.pressed += ((on ? 1 : 0) - pad.pressed) * Math.min(1, dt * 10);
     pad.plate.position.y = 0.16 - pad.pressed * 0.07;
-    pad.plateMat.emissiveIntensity = 0.25 + pad.pressed * 1.6;
-    pad.light.intensity = pad.pressed * 12;
+    pad.plateMat.emissiveIntensity = (glow ? 0.25 : 0.05) + pad.pressed * (glow ? 1.6 : 0.3);
+    pad.light.intensity = glow ? pad.pressed * 12 : 0;
     pad.ring.scale.setScalar(1 + (on ? Math.sin(t * 6) * 0.04 : 0));
   });
+  animatePads(cheesePads, ARENA.cheesePads, true);
+  animatePads(nextPads, ARENA.nextPads, true);
+  animatePads(grayPads, ARENA.grayPads, false);
   // Lobby vs. active game: pads, corner signs and floor tints only show in the lobby (and during
   // the countdown so people can still hop on). During a game the room outline takes the game's color.
   const lobbyLook = snap.phase === 'lobby' || snap.phase === 'countdown';
-  for (const pad of [...pads, ...cheesePads]) pad.group.visible = lobbyLook;
-  pvpSign.visible = cheeseSign.visible = pvpFloor.visible = cheeseFloor.visible = lobbyLook;
+  for (const pad of [...pads, ...cheesePads, ...nextPads, ...grayPads]) pad.group.visible = lobbyLook;
+  pvpSign.visible = cheeseSign.visible = pvpFloor.visible = cheeseFloor.visible = nextFloor.visible = lobbyLook;
   if (roomEdges) roomEdges.material.color.setHex(lobbyLook ? 0xff3df2 : snap.mode === 'cheese' ? 0xffd400 : 0xff3030);
   // hatches glow when weapons are dropping
   hatchFlash = Math.max(0, hatchFlash - dt * 0.8);
@@ -2041,6 +2051,8 @@ function updateHud() {
       : `4xPVP: stand on a green pad in the northwest corner · ${occupied}/${ARENA.pads.length} pressed`;
     const cheeseOn = ARENA.cheesePads.filter(p => snap.players.some(pl => Math.hypot(pl.p[0] - p.x, pl.p[2] - p.z) <= p.r && pl.p[1] < 1)).length;
     if (onCheesePad(me.pos.x, me.pos.z, me.pos.y) || cheeseOn) status = `🧀 Say Cheese: stand on a yellow pad · ${cheeseOn}/${ARENA.cheesePads.length} pressed`;
+    if (onPadList(ARENA.nextPads, me.pos.x, me.pos.z, me.pos.y)) status = '🔵 A new game is coming to these blue pads soon!';
+    if (onPadList(ARENA.grayPads, me.pos.x, me.pos.z, me.pos.y)) status = 'These gray pads aren\'t used yet';
   } else if (snap.phase === 'countdown') status = snap.mode === 'cheese'
     ? (isFighter() ? '🧀 Say Cheese is starting — get your face ready!' : '🧀 Say Cheese starting — hop on a free yellow pad to join!')
     : (isFighter() ? 'Get ready!' : 'Battle starting — jump on a free pad to join!');

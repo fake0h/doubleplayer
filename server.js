@@ -241,6 +241,8 @@ function spawnWeapon(forceType) {
   } while (ARENA.pads.some(p => Math.hypot(x - p.x, z - p.z) < 3)
         || ARENA.jumpPads.some(p => Math.hypot(x - p.x, z - p.z) < 3)
         || ARENA.cheesePads.some(p => Math.hypot(x - p.x, z - p.z) < 3)
+        || ARENA.nextPads.some(p => Math.hypot(x - p.x, z - p.z) < 3)
+        || ARENA.grayPads.some(p => Math.hypot(x - p.x, z - p.z) < 3)
         || insideAnyWall(x, z, 1.2));
   const specialsOut = [...weapons.values()].filter(w => WEAPONS[w.type].special).length;
   let type = forceType;

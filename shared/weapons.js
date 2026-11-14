@@ -133,7 +133,20 @@ export const ARENA = {
     { x: -24.5, z: -24.5, r: 2.2 },
     { x: -17.5, z: -24.5, r: 2.2 },
   ],
-  // Say Cheese (northeast corner, yellow): game still being designed
+  // Next game (middle of the east wall, next to the Say Cheese smiley sign, blue): being designed
+  nextPads: [
+    { x: 24.5, z: -3.5, r: 2.2 },
+    { x: 17.5, z: -3.5, r: 2.2 },
+    { x: 24.5, z: 3.5,  r: 2.2 },
+    { x: 17.5, z: 3.5,  r: 2.2 },
+  ],
+  // Gray, unused for now: southeast corner, and across the room on the west wall (middle + southwest corner)
+  grayPads: [
+    { x: 24.5, z: 17.5, r: 2.2 }, { x: 17.5, z: 17.5, r: 2.2 }, { x: 24.5, z: 24.5, r: 2.2 }, { x: 17.5, z: 24.5, r: 2.2 },
+    { x: -24.5, z: -3.5, r: 2.2 }, { x: -17.5, z: -3.5, r: 2.2 }, { x: -24.5, z: 3.5, r: 2.2 }, { x: -17.5, z: 3.5, r: 2.2 },
+    { x: -24.5, z: 17.5, r: 2.2 }, { x: -17.5, z: 17.5, r: 2.2 }, { x: -24.5, z: 24.5, r: 2.2 }, { x: -17.5, z: 24.5, r: 2.2 },
+  ],
+  // Say Cheese (northeast corner, yellow)
   cheesePads: [
     { x: 24.5, z: -17.5, r: 2.2 },
     { x: 17.5, z: -17.5, r: 2.2 },
@@ -163,9 +176,8 @@ export const ARENA = {
   wallsActiveMs: 30000, // walls stay up for 30s after someone grabs a Wall Breaker
   walls: [
     { x: 0,   z: -8,  len: 8, ax: 'x' }, { x: 0,   z: 8,   len: 8, ax: 'x' },
-    { x: -16, z: -4,  len: 8, ax: 'z' }, { x: 16,  z: 4,   len: 8, ax: 'z' },
+    { x: -12, z: -4,  len: 8, ax: 'z' }, { x: 12,  z: 4,   len: 8, ax: 'z' },
     { x: -6,  z: 18,  len: 8, ax: 'z' }, { x: 6,   z: -18, len: 8, ax: 'z' },
-    { x: -22, z: 4,   len: 7, ax: 'x' }, { x: 22,  z: -4,  len: 7, ax: 'x' },
     { x: 0,   z: 24,  len: 8, ax: 'x' }, { x: 0,   z: -24, len: 8, ax: 'x' },
     { x: -9,  z: -15, len: 6, ax: 'x' }, { x: 9,   z: 15,  len: 6, ax: 'x' },
     { x: 14,  z: 22,  len: 6, ax: 'z' }, { x: -14, z: -22, len: 6, ax: 'z' },
@@ -174,14 +186,13 @@ export const ARENA = {
 
 // Where a roaming jump pad is at time t (seconds). They circle the outer part of the
 // arena on wobbly paths, staying clear of the pressure pads in the middle.
+export const allPadSets = () => [ARENA.pads, ARENA.cheesePads, ARENA.nextPads, ARENA.grayPads];
 export function jumpPadPos(i, t) {
   const sp = ARENA.jumpPadMoveSpeed;
   const a = t * sp * (i % 2 === 0 ? 1 : -1.3) + i * Math.PI / 2 + Math.PI / 4;
   // two tracks: pads 0 & 2 on an outer ring, pads 1 & 3 on an inner ring (so they never collide)
-  // outer track dips inward near the 4xPVP (northwest) and Say Cheese (northeast) corners
-  // so jump pads never roll over the game pads
-  const dip = Math.max(...[-3 * Math.PI / 4, -Math.PI / 4].map(c => Math.pow(Math.max(0, Math.cos(a - c)), 6)));
-  const r = i % 2 === 0 ? 23.5 + 1.5 * Math.sin(t * sp * 2.3 + i * 1.7) - 6.5 * dip : 11.4 + 0.6 * Math.sin(t * sp * 2.3 + i * 1.7);
+  // pad stations line both side walls, so the jump pads roam two rings in the middle of the room
+  const r = i % 2 === 0 ? 12.6 + 0.4 * Math.sin(t * sp * 2.3 + i * 1.7) : 7.6 + 0.4 * Math.sin(t * sp * 2.3 + i * 1.7);
   return { x: Math.cos(a) * r, z: Math.sin(a) * r };
 }
 

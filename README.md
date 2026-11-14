@@ -6,6 +6,8 @@ Everyone who opens the site appears as a glowing wireframe body in a big neon ro
 
 - **4xPVP** (northwest corner, neon-green pads, big 4xPVP sign facing the Say Cheese sign across the room): the weapons free-for-all described below.
 - **Say Cheese** (northeast corner, yellow pads, big smiley face): a face-making game played with your camera. See below.
+- **Next game** (middle of the east wall, blue pads, next to the Say Cheese smiley): coming soon.
+- **Gray pads** (southeast corner, and across the room on the west wall in the middle and the southwest corner): not used yet.
 
 **Alone on a pad?** A panel pops up with **📣 Invite everyone** (key **I**): every other player in the arena gets a popup with a **Join** button (key **J**) that drops them onto a free pad. **🔗 Copy link** (key **L**) copies the game's address to send to friends who aren't on the site yet. On the Say Cheese pads there's also **▶ Play now** (key **P**) to start a game with everyone in front of your camera.
 
