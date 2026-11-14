@@ -359,7 +359,67 @@ const BUILDERS = {
     g.add(part(new THREE.SphereGeometry(0.035, 6, 4), mat(0xffffff, { emissive: 0xffffff, emissiveIntensity: 0.5 }), -0.08, 0.32, -0.17)); // shine
     return g;
   },
+  lava_bucket: (c) => {
+    const g = new THREE.Group();
+    g.add(part(cyl(0.22, 0.17, 0.36, 16), mat(0x8a8f99, { metalness: 0.85, roughness: 0.3 }), 0, 0.18, 0));
+    g.add(part(new THREE.TorusGeometry(0.22, 0.018, 6, 20), mat(0x6a6f79, { metalness: 0.9 }), 0, 0.36, 0, Math.PI / 2));
+    g.add(part(cyl(0.205, 0.205, 0.03, 16), glow(c), 0, 0.33, 0));                     // lava surface
+    g.add(part(new THREE.TorusGeometry(0.2, 0.012, 6, 16, Math.PI), mat(0x444444, { metalness: 0.9 }), 0, 0.36, 0));      // handle
+    const flames = new THREE.Group(); flames.userData.flames = true;
+    for (let i = 0; i < 4; i++) {
+      const f = part(new THREE.SphereGeometry(0.05, 8, 6), glow(i % 2 ? 0xffd000 : 0xff3000), Math.cos(i * 1.6) * 0.1, 0.37, Math.sin(i * 1.6) * 0.1);
+      f.material = f.material.clone(); f.material.transparent = true; f.material.opacity = 0.9;
+      flames.add(f);
+    }
+    g.add(flames);
+    return g;
+  },
+  robot_swarm: (c) => buildRobot(0.55),
+  invisibility_cloak: (c) => {
+    const g = new THREE.Group();
+    const cloth = mat(c, { transparent: true, opacity: 0.45, emissive: c, emissiveIntensity: 0.6, side: THREE.DoubleSide });
+    g.add(part(new THREE.ConeGeometry(0.32, 0.75, 14, 1, true), cloth, 0, 0.38, 0));
+    g.add(part(new THREE.SphereGeometry(0.13, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.6), cloth, 0, 0.78, 0.02));      // hood
+    const sparkles = new THREE.Group(); sparkles.userData.flames = true;
+    for (let i = 0; i < 5; i++) {
+      const sp = part(new THREE.OctahedronGeometry(0.025), glow(0xffffff), Math.cos(i * 1.3) * 0.25, 0.2 + i * 0.12, Math.sin(i * 1.3) * 0.25);
+      sp.material = sp.material.clone(); sp.material.transparent = true;
+      sparkles.add(sp);
+    }
+    g.add(sparkles);
+    return g;
+  },
 };
+
+// Little hunter robot used by the Robot Swarm (and as its pickup model)
+export function buildRobot(scale = 1) {
+  const g = new THREE.Group();
+  const metal = mat(0x9fb4c8, { metalness: 0.8, roughness: 0.3, emissive: 0x000000, emissiveIntensity: 0 });
+  const dark = mat(0x2a3140, { metalness: 0.6 });
+  const body = part(box(0.5, 0.42, 0.38), metal, 0, 0.62, 0);
+  g.add(body);
+  const head = part(box(0.34, 0.24, 0.3), metal, 0, 0.96, 0);
+  g.add(head);
+  const eye = part(box(0.24, 0.06, 0.02), glow(0xff2020), 0, 0.97, -0.16);
+  g.add(eye);
+  g.add(part(cyl(0.012, 0.012, 0.18, 6), dark, 0.1, 1.17, 0));
+  g.add(part(new THREE.SphereGeometry(0.03, 6, 4), glow(0xff2020), 0.1, 1.27, 0));
+  const legs = [];
+  for (const sd of [-1, 1]) {
+    const leg = new THREE.Group();
+    leg.position.set(0.14 * sd, 0.42, 0);
+    leg.add(part(box(0.12, 0.4, 0.14), dark, 0, -0.2, 0));
+    leg.add(part(box(0.16, 0.06, 0.22), dark, 0, -0.4, -0.03));
+    g.add(leg);
+    legs.push(leg);
+    const arm = part(box(0.1, 0.34, 0.1), dark, 0.31 * sd, 0.6, -0.05, -0.6, 0, 0);
+    g.add(arm);
+  }
+  g.userData.legs = legs;
+  g.userData.metal = metal;
+  g.scale.setScalar(scale);
+  return g;
+}
 
 export function buildWeaponMesh(type) {
   const def = WEAPONS[type];

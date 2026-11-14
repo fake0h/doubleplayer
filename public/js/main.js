@@ -1,7 +1,7 @@
 import * as THREE from 'three';
-import { WEAPONS, ARENA, FALL_MS, USES_PER_WEAPON, MAX_HEALTH, usesOf, wallBox, wallHeightAt, weaponName, ADMIN_PANEL } from '/shared/weapons.js';
+import { WEAPONS, ARENA, FALL_MS, USES_PER_WEAPON, MAX_HEALTH, usesOf, wallBox, wallHeightAt, weaponName, ADMIN_PANEL, LAVA, ROBOTS, WEAPON_IDS } from '/shared/weapons.js';
 import { WireBody } from './body.js';
-import { buildWeaponMesh, animateWeaponMesh } from './weaponMeshes.js';
+import { buildWeaponMesh, animateWeaponMesh, buildRobot } from './weaponMeshes.js';
 
 // ---------- renderer / scene ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -179,6 +179,87 @@ function updateJumpPads(dt, t) {
   }
 }
 
+// ---------- lava floor ----------
+const LAVA_N = Math.round(ARENA.size / LAVA.tile);
+const lavaTex = (() => {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const x = c.getContext('2d');
+  x.fillStyle = '#c21d00'; x.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < 70; i++) {
+    const r = 6 + Math.random() * 18;
+    const gr = x.createRadialGradient(0, 0, 0, 0, 0, r);
+    gr.addColorStop(0, Math.random() < 0.5 ? '#ffe14f' : '#ff8a00'); gr.addColorStop(1, 'rgba(255,60,0,0)');
+    x.save(); x.translate(Math.random() * 128, Math.random() * 128); x.fillStyle = gr; x.fillRect(-r, -r, r * 2, r * 2); x.restore();
+  }
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+})();
+const lavaMat = new THREE.MeshBasicMaterial({ map: lavaTex, transparent: true, opacity: 0.95 });
+const lavaWarnMat = new THREE.MeshBasicMaterial({ color: 0xff7a00, transparent: true, opacity: 0.3, depthWrite: false });
+const lavaTiles = [];
+for (let j = 0; j < LAVA_N; j++) for (let i = 0; i < LAVA_N; i++) {
+  const tile = new THREE.Mesh(new THREE.PlaneGeometry(LAVA.tile - 0.05, LAVA.tile - 0.05), lavaMat);
+  tile.rotation.x = -Math.PI / 2;
+  tile.position.set(-ARENA.size / 2 + (i + 0.5) * LAVA.tile, 0.025, -ARENA.size / 2 + (j + 0.5) * LAVA.tile);
+  tile.visible = false;
+  scene.add(tile);
+  lavaTiles.push(tile);
+}
+const lavaLight = new THREE.HemisphereLight(0xff5a00, 0x000000, 0);
+scene.add(lavaLight);
+function lavaAt(x, z) {
+  const L = snap.lava; if (!L) return false;
+  const i = Math.floor((x + ARENA.size / 2) / LAVA.tile), j = Math.floor((z + ARENA.size / 2) / LAVA.tile);
+  return i >= 0 && j >= 0 && i < LAVA_N && j < LAVA_N && L.mask[j * LAVA_N + i] === '1';
+}
+function updateLava(t) {
+  const L = snap.lava;
+  const warning = L && L.age < LAVA.warnMs;
+  lavaTiles.forEach((tile, k) => {
+    tile.visible = !!L && L.mask[k] === '1';
+    tile.material = warning ? lavaWarnMat : lavaMat;
+  });
+  lavaWarnMat.opacity = 0.25 + Math.abs(Math.sin(t * 8)) * 0.45;
+  lavaTex.offset.set(Math.sin(t * 0.3) * 0.2, t * 0.05);
+  lavaLight.intensity = L && !warning ? 0.6 + Math.sin(t * 3) * 0.15 : 0;
+  // bubbling
+  if (L && !warning && Math.random() < 0.3) {
+    const k = Math.floor(Math.random() * lavaTiles.length);
+    if (lavaTiles[k].visible) addBurst(lavaTiles[k].position.clone().add(new THREE.Vector3((Math.random() - 0.5) * 5, 0.1, (Math.random() - 0.5) * 5)), 0xffa000, 3, 2.5, 0.1, 0.5);
+  }
+}
+
+// ---------- robot swarm ----------
+const robotMeshes = new Map(); // id -> { g, target }
+function updateRobots(dt, t) {
+  const seen = new Set();
+  for (const [id, x, z, yaw, age] of snap.robots || []) {
+    seen.add(id);
+    let r = robotMeshes.get(id);
+    if (!r) {
+      const g = buildRobot(1.1);
+      g.position.set(x, -1.3, z);
+      scene.add(g);
+      r = { g, x, z, yaw, age, recv: performance.now() };
+      robotMeshes.set(id, r);
+      addBurst(new THREE.Vector3(x, 0.2, z), 0x777777, 10, 3, 0.1, 0.5);
+    }
+    r.x = x; r.z = z; r.yaw = yaw; r.age = age; r.recv = performance.now();
+  }
+  for (const [id, r] of robotMeshes) {
+    if (!seen.has(id)) { addBurst(r.g.position.clone().add(new THREE.Vector3(0, 0.6, 0)), 0x9fb4c8, 8, 3, 0.08, 0.4); scene.remove(r.g); robotMeshes.delete(id); continue; }
+    const age = r.age + (performance.now() - r.recv);
+    const rise = Math.min(1, age / ROBOTS.riseMs);           // climbing out of the floor
+    r.g.position.x += (r.x - r.g.position.x) * Math.min(1, dt * 10);
+    r.g.position.z += (r.z - r.g.position.z) * Math.min(1, dt * 10);
+    r.g.position.y = -1.3 * (1 - rise);
+    let dy = r.yaw - r.g.rotation.y; dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    r.g.rotation.y += dy * Math.min(1, dt * 10);
+    const legs = r.g.userData.legs;
+    legs[0].rotation.x = Math.sin(t * 14 + id) * 0.6; legs[1].rotation.x = -legs[0].rotation.x;
+  }
+}
+
 // ---------- admin panel (north wall) ----------
 const adminPanel = (() => {
   const g = new THREE.Group();
@@ -215,6 +296,79 @@ const adminPanel = (() => {
   scene.add(g);
   return { light, floorMark };
 })();
+
+// ---------- weapon showcase: every weapon framed on the admin panel wall ----------
+const showcase = [];
+(() => {
+  const ids = [...WEAPON_IDS].sort((a, b) => {
+    const A = WEAPONS[a], B = WEAPONS[b];
+    if (!!A.special !== !!B.special) return A.special ? 1 : -1;     // normal weapons first, then specials
+    return A.special ? 0 : A.damage - B.damage;                      // weakest to strongest
+  });
+  const perRow = Math.ceil(ids.length / 2);
+  const span = ARENA.size - 8;                 // keep clear of the corners
+  const gap = 2.6;                             // keep clear of the admin panel in the middle
+  const half = Math.ceil(perRow / 2);
+  const step = (span / 2 - gap) / half;
+  const W = Math.min(1.9, step - 0.2), Hh = 1.9;
+  ids.forEach((id, n) => {
+    const row = Math.floor(n / perRow), col = n % perRow;
+    const side = col < half ? -1 : 1;
+    const k = col < half ? half - 1 - col : col - half;   // fill outward from the admin panel
+    const x = side * (gap + step * (k + 0.5));
+    const y = row === 0 ? 2.0 : 4.4;
+    const def = WEAPONS[id];
+    const g = new THREE.Group();
+    g.position.set(x, y, -HALF + 0.08);
+    const frameCol = def.special ? 0xffd23c : 0x00e5ff;
+    const back = new THREE.Mesh(new THREE.PlaneGeometry(W, Hh), new THREE.MeshStandardMaterial({ color: 0x0b1020, roughness: 0.9 }));
+    g.add(back);
+    const bar = (w, h, px, py) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.08), new THREE.MeshBasicMaterial({ color: frameCol })); m.position.set(px, py, 0.03); g.add(m); };
+    bar(W + 0.08, 0.06, 0, Hh / 2); bar(W + 0.08, 0.06, 0, -Hh / 2); bar(0.06, Hh, -W / 2, 0); bar(0.06, Hh, W / 2, 0);
+    // name plate
+    const c = document.createElement('canvas'); c.width = 256; c.height = 64;
+    const cx = c.getContext('2d');
+    cx.fillStyle = def.special ? '#3a2a00' : '#06202a'; cx.fillRect(0, 0, 256, 64);
+    cx.textAlign = 'center';
+    cx.fillStyle = def.special ? '#ffd23c' : '#bff6ff'; cx.font = 'bold 26px sans-serif';
+    cx.fillText((def.special ? '★ ' : '') + def.name, 128, 28, 244);
+    cx.fillStyle = '#ffffff'; cx.font = '20px sans-serif';
+    cx.fillText(def.special ? 'SPECIAL' : `${def.damage} damage · ${def.kind}`, 128, 54, 244);
+    const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+    const plate = new THREE.Mesh(new THREE.PlaneGeometry(W - 0.1, (W - 0.1) / 4), new THREE.MeshBasicMaterial({ map: tex }));
+    plate.position.set(0, -Hh / 2 + (W - 0.1) / 8 + 0.06, 0.02);
+    g.add(plate);
+    // the weapon itself, scaled to fit and slowly turning
+    const mesh = buildWeaponMesh(id);
+    const holder = new THREE.Group();
+    holder.add(mesh);
+    const box3 = new THREE.Box3().setFromObject(mesh);
+    const size = box3.getSize(new THREE.Vector3()), center = box3.getCenter(new THREE.Vector3());
+    mesh.position.sub(center);
+    holder.scale.setScalar(Math.min(1.1 / Math.max(size.x, size.y, size.z, 0.01), 3));
+    holder.position.set(0, 0.2, 0.35);
+    holder.rotation.z = ['heal', 'berserk', 'walls', 'bombs', 'lava', 'robots', 'cloak'].includes(def.kind) ? 0 : -0.75;
+    g.add(holder);
+    if (def.special) {
+      const l = new THREE.PointLight(0xffd23c, 1.2, 3);
+      l.position.set(0, 0.3, 0.8);
+      g.add(l);
+    }
+    scene.add(g);
+    showcase.push({ holder, mesh });
+  });
+})();
+// big title above the showcase
+{
+  const c = document.createElement('canvas'); c.width = 1024; c.height = 96;
+  const x = c.getContext('2d');
+  x.fillStyle = '#ffd23c'; x.font = 'bold 64px sans-serif'; x.textAlign = 'center';
+  x.fillText('WEAPONS OF DOUBLE PLAYER', 512, 70);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const title = new THREE.Mesh(new THREE.PlaneGeometry(16, 1.5), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+  title.position.set(0, 6.6, -HALF + 0.1);
+  scene.add(title);
+}
 
 // ---------- pressure pads ----------
 const pads = ARENA.pads.map((p, i) => {
@@ -357,8 +511,9 @@ function applySnapshot(s) {
     a.data = p;
     a.body.setMuscle(p.muscle || 0);
     a.body.rainbow = (p.inv || 0) > 0;
+    a.cloaked = (p.cloak || 0) > 0;
     if (p.id !== me.id) { a.target.set(...p.p); a.yaw = p.yaw; }
-    else { me.hp = p.hp; me.weapon = p.w; me.uses = p.uses; me.streak = p.streak || 0; me.muscle = p.muscle || 0; me.inv = p.inv || 0; }
+    else { me.hp = p.hp; me.weapon = p.w; me.uses = p.uses; me.streak = p.streak || 0; me.muscle = p.muscle || 0; me.inv = p.inv || 0; me.cloak = p.cloak || 0; }
     if (a.weaponType !== p.w) {
       a.weaponType = p.w;
       a.body.setWeapon(p.w ? buildWeaponMesh(p.w) : null, p.w ? WEAPONS[p.w].kind : null);
@@ -373,7 +528,7 @@ function applySnapshot(s) {
     if (!floorWeapons.has(w.id)) {
       const group = new THREE.Group();
       const mesh = buildWeaponMesh(w.type);
-      const upright = ['heal', 'berserk', 'walls', 'bombs'].includes(WEAPONS[w.type].kind);
+      const upright = ['heal', 'berserk', 'walls', 'bombs', 'lava', 'robots', 'cloak'].includes(WEAPONS[w.type].kind);
       mesh.rotation.z = upright ? 0 : Math.PI / 2;   // cakes and helmets sit upright, the rest lie flat
       if (WEAPONS[w.type].kind === 'berserk') mesh.position.y = 0.05;
       mesh.position.y = 0;
@@ -601,6 +756,11 @@ function connect() {
         if (m.kind === 'homing') onHomingFx(m);
         else if (m.kind === 'berserk') onBerserkFx(m);
         else if (m.kind === 'punch') onPunchFx(m);
+        else if (m.kind === 'robothit') {
+          const r = robotMeshes.get(m.robot);
+          if (r) addBurst(r.g.position.clone().add(new THREE.Vector3(0, 0.9, 0)), 0xff2020, 8, 4, 0.08, 0.3);
+          tone(220, 0.08, 'square', 0.08, -100);
+        }
         else if (m.kind === 'ram') {
           const tgt = avatars.get(m.to);
           if (tgt) addBurst(tgt.body.root.position.clone().add(new THREE.Vector3(0, 1.1, 0)), new THREE.Color().setHSL(Math.random(), 1, 0.6).getHex(), 14, 6, 0.1, 0.5);
@@ -804,7 +964,7 @@ function onBombs(m) {
   if (!bombProto) bombProto = buildWeaponMesh('bomb');
   const t0 = performance.now();
   const mine = m.owner === me.id;
-  banner(mine ? '💣 BOMBS AWAY! You are immune — chase them into the blasts!' : '💣 100 BOMBS INCOMING — FIND A CLEAR SPOT!', 3000);
+  banner(mine ? '💣 BOMBS AWAY! They hit you too — find a clear spot!' : '💣 100 BOMBS INCOMING — FIND A CLEAR SPOT!', 3000);
   tone(1200, 0.3, 'square', 0.1, -900);
   for (const [x, z, delay] of m.list) {
     const mesh = bombProto.clone(true);
@@ -941,7 +1101,7 @@ function onHit(m) {
     tone(110, 0.2, 'sawtooth', 0.12, -60);
   }
   if (m.from === me.id) { hitMarkerT = 0.25; tone(1200, 0.05, 'square', 0.06); }
-  if (m.weapon === 'berserk_helmet' || m.weapon === 'poop_bazooka' || m.weapon === 'bomb') return; // multi-hit attacks: skip feed spam
+  if (['berserk_helmet', 'poop_bazooka', 'bomb', 'lava', 'robot'].includes(m.weapon)) return; // multi-hit attacks: skip feed spam
   feed(`${avatars.get(m.from)?.data.name ?? '?'} hit ${target?.data.name ?? '?'} with ${def.name} for ${m.dmg}`,
     m.from === me.id ? '#7dff3d' : m.target === me.id ? '#ff6060' : '#c8d8ff');
 }
@@ -1229,6 +1389,10 @@ function updateLocal(dt) {
     a.body.root.position.copy(me.pos);
     a.body.root.rotation.y = me.yaw;
     a.body.update(dt, me.moving, me.pitch, downed);
+    // you can still see yourself while cloaked, as a faint ghost
+    const ghost = me.cloak > 0;
+    a.body.mat.opacity = ghost ? 0.25 : 0.95;
+    a.body.fillMat.opacity = ghost ? 0.02 : a.body.fillMat.opacity;
   }
 }
 
@@ -1241,6 +1405,7 @@ function updateRemotes(dt) {
     a.body.root.rotation.y += dy * Math.min(1, dt * 12);
     const downed = a.data.hp <= 0 && snap.fighters.includes(id) && snap.phase !== 'lobby';
     a.body.update(dt, a.data.moving, a.data.pitch, downed);
+    a.body.root.visible = !a.cloaked;   // invisibility cloak: other players can't see you
   }
 }
 
@@ -1257,7 +1422,7 @@ function updateWeapons(dt, t) {
       addBurst(new THREE.Vector3(fw.x, 0.2, fw.z), WEAPONS[fw.type].color, 10, 3, 0.06, 0.4);
       if (Math.hypot(fw.x - me.pos.x, fw.z - me.pos.z) < 25) tone(180, 0.08, 'triangle', 0.05);
     }
-    fw.holder.rotation.x = landed || fw.special && ['heal', 'berserk', 'walls', 'bombs'].includes(WEAPONS[fw.type].kind) ? 0 : age * 6;
+    fw.holder.rotation.x = landed || fw.special && ['heal', 'berserk', 'walls', 'bombs', 'lava', 'robots', 'cloak'].includes(WEAPONS[fw.type].kind) ? 0 : age * 6;
     fw.group.rotation.y += dt * (landed ? 0.8 : 3);
     fw.group.position.y += landed ? Math.sin(t * 3 + id) * 0.08 + 0.1 : 0;
     fw.ring.material.opacity = landed ? (near && near.id === id ? 0.9 : 0.35) : 0;
@@ -1284,6 +1449,7 @@ function updateWeapons(dt, t) {
     animateWeaponMesh(fw.mesh, t);
   }
   for (const a of avatars.values()) if (a.body.held) animateWeaponMesh(a.body.held, t);
+  for (const sc of showcase) { sc.holder.rotation.y = Math.sin(t * 0.6) * 0.6; animateWeaponMesh(sc.mesh, t); }
 
   // pickup prompt
   if (near && isFighter() && (!me.weapon || WEAPONS[near.type].instant) && snap.phase === 'fight' && me.hp > 0) {
@@ -1378,6 +1544,9 @@ function updateHud() {
       : `Fight! ${alive} fighters left`;
   }
   if (snap.wallsLeft > 0) status += ` · 🧱 Maze: ${Math.ceil(snap.wallsLeft / 1000)}s`;
+  if (snap.lava) status += snap.lava.age < LAVA.warnMs ? ' · 🌋 LAVA INCOMING!' : ` · 🌋 Lava: ${Math.ceil((LAVA.warnMs + LAVA.ms - snap.lava.age) / 1000)}s`;
+  if ((snap.robots || []).length) status += ` · 🤖 ${snap.robots.length} robots`;
+  if (me.cloak > 0) status = `👻 INVISIBLE ${Math.ceil(me.cloak / 1000)}s · ` + status;
   if (me.inv > 0) status = `🌈 INVINCIBLE ${Math.ceil(me.inv / 1000)}s — run into your enemy! · ` + status;
   else if (snap.phase === 'over') status = 'Match over — back to the lobby soon';
   ui.status.textContent = status;
@@ -1398,7 +1567,7 @@ function updateHud() {
 
   // name tags over other players
   for (const [id, a] of avatars) {
-    if (id === me.id) { a.label.style.display = 'none'; continue; }
+    if (id === me.id || a.cloaked) { a.label.style.display = 'none'; continue; }
     const p = a.body.root.position.clone().add(new THREE.Vector3(0, 2.25, 0));
     const v = p.project(camera);
     if (v.z > 1 || Math.abs(v.x) > 1.2 || Math.abs(v.y) > 1.2) { a.label.style.display = 'none'; continue; }
@@ -1414,6 +1583,10 @@ function updateHud() {
     bar.style.background = hpColor(a.data.hp);
   }
 
+  const onLava = snap.lava && snap.lava.age >= LAVA.warnMs && me.pos.y < 0.4 && lavaAt(me.pos.x, me.pos.z) && me.hp > 0;
+  if (onLava) ui.vignette.style.boxShadow = `inset 0 0 ${150 + Math.sin(clock.t * 10) * 30}px rgba(255,90,0,0.6)`;
+  else if (ui.vignette.dataset.lava) ui.vignette.style.boxShadow = 'inset 0 0 160px rgba(255,0,0,0)';
+  ui.vignette.dataset.lava = onLava ? '1' : '';
   hitMarkerT = Math.max(0, hitMarkerT - 1 / 60);
   ui.crosshair.classList.toggle('hit', hitMarkerT > 0);
 }
@@ -1434,6 +1607,8 @@ function frame() {
   updateFx(dt);
   updateHoming();
   updateBombs(clock.t);
+  updateLava(clock.t);
+  updateRobots(dt, clock.t);
   updateCamera(dt);
   updateHud();
   renderer.render(scene, camera);

@@ -10,12 +10,16 @@ Everyone who opens the site appears as a glowing wireframe body in a big neon ro
 - **Jump pads** (four green ones) slowly roam around the arena on an inner and an outer track. Step on one and it flings you about 29m into the air, out over the arena. You get only a little steering on the way down.
 - **Jumping** is high: about 4.4m, enough to see over the action, but not over a raised wall.
 
+## Weapon wall
+
+The north wall (around the admin panel) shows every weapon in the game in its own frame, with its name and damage. Specials have gold frames.
+
 ## Admin panel
 
 A glowing **ADMIN** panel hangs on the north wall. Walk up to it and press **E**, **left click**, or on a touchscreen tap **GRAB** (it glows when you're close enough) to open the number pad. The keypad has big buttons that work with touch, mouse, or your keyboard's number keys. The right code (**812**) unlocks the cheat menu. The server checks the code, and you have to be standing at the panel to enter it:
 
 - **Summon fake0h Spear**: puts a fake0h Fire Spear in your hand.
-- **Drop Bombs**: 100 bombs fall from the ceiling (you're immune).
+- **Drop Bombs**: 100 bombs fall from the ceiling. They hit everyone, you too!
 - **Invincible**: for 30 seconds you get a rainbow skin, take no damage, and hurt anyone you run into (10 damage every half second).
 
 To change the code without editing the code, set the `ADMIN_CODE` environment variable on Render.
@@ -73,7 +77,10 @@ Rare drops that glow from across the room: a tall colored light beam, sparkles, 
 | fake0h Fire Spear | A guided missile. Throw it from anywhere: it hunts your opponent down and always kills | 1 |
 | Birthday Cake | Eat it to restore all your health | 1 |
 | Wall Breaker (rarest) | Works the moment you grab it: raises the maze walls for 30 seconds | instant |
-| Bomb | Works the moment you grab it: 100 bombs rain from the ceiling, blink for 3 seconds, then explode for 50 damage each. Red rings show each blast zone. Whoever grabs it is immune | instant |
+| Bomb | Works the moment you grab it: 100 bombs rain from the ceiling, blink for 3 seconds, then explode for 50 damage each. Red rings show each blast zone. They hit **everyone**, including whoever grabbed it | instant |
+| Lava Bucket | About half the floor tiles glow orange for 2 seconds, then turn to lava for 20 seconds: 10 damage per second to anyone standing in it (including you). Jump or stand on a wall to stay safe | instant |
+| Robot Swarm | 10 robots climb out of the floor and hunt the other players for 20 seconds: 10 damage per hit | instant |
+| Invisibility Cloak | You disappear from everyone else's screen for 20 seconds | instant |
 
 Silly weapons drop often and deadly ones are rare. To change damage, range, cooldown, or how often a weapon drops, edit `shared/weapons.js`.
 

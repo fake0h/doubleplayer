@@ -8,7 +8,7 @@ import { WebSocketServer } from 'ws';
 import {
   WEAPONS, USES_PER_WEAPON, MAX_HEALTH, ARENA, FALL_MS, randomWeaponType, HIT_TUNING,
   randomSpecialType, usesOf, wallBox, wallHeightAt, segmentHitsWalls, jumpPadPos, BOMBS,
-  weaponName, ADMIN_PANEL, INVINCIBLE,
+  weaponName, ADMIN_PANEL, INVINCIBLE, LAVA, ROBOTS, CLOAK_MS,
 } from './shared/weapons.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -140,6 +140,8 @@ function makePlayer(ws) {
     adminTries: 0,
     invincibleUntil: 0,
     lastRam: 0,
+    cloakUntil: 0,
+    lastLava: 0,
   };
 }
 
@@ -222,7 +224,9 @@ function resetToLobby() {
   game.fighters = [];
   game.winner = null;
   weapons.clear();
-  for (const pl of players.values()) { pl.hp = MAX_HEALTH; pl.weapon = null; pl.invincibleUntil = 0; }
+  for (const pl of players.values()) { pl.hp = MAX_HEALTH; pl.weapon = null; pl.invincibleUntil = 0; pl.cloakUntil = 0; }
+  lava = null;
+  robots = [];
 }
 
 function startFight() {
@@ -487,10 +491,80 @@ function useInstant(pl, type) {
   send(pl.ws, { t: 'picked', weapon: type, instant: true });
   if (type === 'wall_breaker') return activateWalls(pl);
   if (type === 'bomb') return bombRain(pl);
+  if (type === 'lava_bucket') return spillLava(pl);
+  if (type === 'robot_swarm') return releaseRobots(pl);
+  if (type === 'invisibility_cloak') {
+    pl.cloakUntil = now() + CLOAK_MS;
+    announce(`👻 ${pl.name} put on the INVISIBILITY CLOAK and vanished!`, 3000);
+  }
+}
+
+// ---------- Lava Bucket ----------
+const LAVA_N = Math.round(ARENA.size / LAVA.tile); // 10x10 tiles
+let lava = null; // { owner, start, mask: '0101...' }
+function spillLava(owner) {
+  const idx = [...Array(LAVA_N * LAVA_N).keys()].sort(() => Math.random() - 0.5);
+  const lavaSet = new Set(idx.slice(0, Math.round(idx.length * LAVA.coverage)));
+  lava = { owner, start: now(), mask: idx.map((_, i) => (lavaSet.has(i) ? '1' : '0')).join('') };
+  announce(`🌋 ${owner.name} spilled the LAVA BUCKET — half the floor is turning to lava! Get off the glowing tiles!`, 3500);
+}
+function lavaTileAt(x, z) {
+  const i = Math.floor((x + ARENA.size / 2) / LAVA.tile), j = Math.floor((z + ARENA.size / 2) / LAVA.tile);
+  if (i < 0 || j < 0 || i >= LAVA_N || j >= LAVA_N) return false;
+  return lava.mask[j * LAVA_N + i] === '1';
+}
+function tickLava(t) {
+  if (!lava) return;
+  if (t - lava.start > LAVA.warnMs + LAVA.ms) { lava = null; announce('The lava cooled down', 1500); return; }
+  if (game.phase !== 'fight' || t - lava.start < LAVA.warnMs) return;
+  for (const id of game.fighters) {
+    const pl = players.get(id);
+    if (!pl || pl.hp <= 0 || pl.p[1] > 0.4 || t - pl.lastLava < 1000) continue; // jumping / on a wall = safe
+    if (lavaTileAt(pl.p[0], pl.p[2])) { pl.lastLava = t; damage(pl, LAVA.dps, lava.owner, 'lava'); }
+  }
+}
+
+// ---------- Robot Swarm ----------
+let robots = [];
+let nextRobotId = 1;
+function releaseRobots(owner) {
+  const t = now();
+  for (let i = 0; i < ROBOTS.count; i++) {
+    robots.push({ id: nextRobotId++, owner, x: (Math.random() * 2 - 1) * (HALF - 3), z: (Math.random() * 2 - 1) * (HALF - 3), born: t, hitUntil: 0 });
+  }
+  announce(`🤖 ${owner.name} released the ROBOT SWARM — ${ROBOTS.count} robots are hunting!`, 3000);
+}
+function tickRobots(t, dt) {
+  if (!robots.length) return;
+  robots = robots.filter(r => t - r.born < ROBOTS.ms + ROBOTS.riseMs && game.phase === 'fight');
+  for (const r of robots) {
+    if (t - r.born < ROBOTS.riseMs || t < r.hitUntil) continue; // still climbing out / recovering after a hit
+    // hunt the nearest player that isn't their owner
+    let target = null, bd = Infinity;
+    for (const id of game.fighters) {
+      const pl = players.get(id);
+      if (!pl || pl.hp <= 0 || id === r.owner.id) continue;
+      const d = Math.hypot(pl.p[0] - r.x, pl.p[2] - r.z);
+      if (d < bd) { bd = d; target = pl; }
+    }
+    if (!target) continue;
+    const dx = target.p[0] - r.x, dz = target.p[2] - r.z;
+    r.yaw = Math.atan2(-dx, -dz);
+    if (bd <= ROBOTS.reach && target.p[1] < 1.5) {
+      damage(target, ROBOTS.damage, r.owner, 'robot');
+      broadcast({ t: 'fx', kind: 'robothit', robot: r.id, to: target.id });
+      r.hitUntil = t + ROBOTS.hitCooldownMs;
+      r.x -= dx / bd * 2; r.z -= dz / bd * 2; // bounce back
+    } else {
+      const step = Math.min(bd, ROBOTS.speed * dt);
+      r.x += dx / bd * step; r.z += dz / bd * step;
+    }
+    r.x = Math.max(-HALF, Math.min(HALF, r.x)); r.z = Math.max(-HALF, Math.min(HALF, r.z));
+  }
 }
 
 function bombRain(owner) {
-  announce(`💣 ${owner.name} found the BOMB — 100 bombs incoming! Find a clear spot!`, 3000);
+  announce(`💣 ${owner.name} triggered the BOMBS — 100 incoming and they hit EVERYONE! Find a clear spot!`, 3000);
   const fightId = game.fightStartedAt;
   const list = [];
   for (let i = 0; i < BOMBS.count; i++) {
@@ -500,8 +574,7 @@ function bombRain(owner) {
     list.push([+x.toFixed(2), +z.toFixed(2), delay]);
     setTimeout(() => {
       if (game.phase !== 'fight' || game.fightStartedAt !== fightId) return;
-      for (const id of game.fighters) {
-        if (id === owner.id) continue; // the bomb's owner is immune to their own bombs
+      for (const id of game.fighters) {   // bombs hit everyone, including whoever dropped them
         const pl = players.get(id);
         if (!pl || pl.hp <= 0) continue;
         if (Math.hypot(pl.p[0] - x, pl.p[2] - z) <= WEAPONS.bomb.range && pl.p[1] < 3) damage(pl, WEAPONS.bomb.damage, owner, 'bomb');
@@ -651,6 +724,8 @@ setInterval(() => {
   tickGame();
   const t = now();
   tickRams(t);
+  tickLava(t);
+  tickRobots(t, 0.05);
   const snap = {
     t: 'snap',
     phase: game.phase,
@@ -659,11 +734,14 @@ setInterval(() => {
     pads: padOccupants().map(o => o.length > 0),
     walls: walls.map(w => [w.up ? 1 : 0, t - w.changedAt]),
     wallsLeft: Math.max(0, wallsActiveUntil - t),
+    lava: lava ? { mask: lava.mask, age: t - lava.start } : null,
+    robots: robots.map(r => [r.id, +r.x.toFixed(2), +r.z.toFixed(2), +(r.yaw || 0).toFixed(2), t - r.born]),
     jumpPads: ARENA.jumpPads.map((_, i) => { const p = jumpPadPos(i, t / 1000); return [+p.x.toFixed(2), +p.z.toFixed(2)]; }),
     players: [...players.values()].map(pl => ({
       id: pl.id, name: pl.name, color: pl.color, p: pl.p, yaw: pl.yaw, pitch: pl.pitch,
       streak: pl.streak, muscle: Math.min(5, pl.streak),
       inv: Math.max(0, pl.invincibleUntil - t),
+      cloak: Math.max(0, pl.cloakUntil - t),
       moving: pl.moving, hp: pl.hp, w: pl.weapon ? pl.weapon.type : null, uses: pl.weapon ? pl.weapon.uses : 0,
     })),
     weapons: [...weapons.values()].map(w => ({ id: w.id, type: w.type, x: w.x, z: w.z, spin: w.spin, age: t - w.spawnAt })),

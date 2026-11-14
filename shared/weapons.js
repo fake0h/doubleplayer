@@ -52,7 +52,13 @@ export const WEAPONS = {
   wall_breaker:   { name: 'Wall Breaker',      kind: 'walls',   damage: 0,  range: 0,  cone: 0,   cooldown: 0,    color: 0xa855ff, special: true, instant: true, uses: 1, weight: 1,
                     desc: 'Raises the maze walls for 30 seconds' },
   bomb:           { name: 'Bomb',              kind: 'bombs',   damage: 50, range: 2.4, cone: 0,  cooldown: 0,    color: 0xff3030, special: true, instant: true, uses: 1, weight: 2,
-                    desc: '100 bombs rain from the ceiling and explode for 50 damage (you are immune)' },
+                    desc: '100 bombs rain from the ceiling and explode for 50 damage — they hit EVERYONE' },
+  lava_bucket:    { name: 'Lava Bucket',       kind: 'lava',    damage: 10, range: 0,  cone: 0,   cooldown: 0,    color: 0xff5a00, special: true, instant: true, uses: 1, weight: 2,
+                    desc: 'Turns about half the floor into lava for 20s (10 damage per second to anyone in it)' },
+  robot_swarm:    { name: 'Robot Swarm',       kind: 'robots',  damage: 10, range: 0,  cone: 0,   cooldown: 0,    color: 0x9fb4c8, special: true, instant: true, uses: 1, weight: 2,
+                    desc: '10 robots burst out of the floor and hunt the other players for 20s (10 damage per hit)' },
+  invisibility_cloak: { name: 'Invisibility Cloak', kind: 'cloak', damage: 0, range: 0, cone: 0,  cooldown: 0,    color: 0x9ad8ff, special: true, instant: true, uses: 1, weight: 3,
+                    desc: 'You turn invisible to the other players for 20 seconds' },
 };
 
 // ---- Hit area tuning ----
@@ -100,11 +106,16 @@ export function randomSpecialType(rng = Math.random) {
 }
 
 // Names for damage sources that aren't weapons
-export const weaponName = (type) => WEAPONS[type]?.name ?? ({ invincible: 'Rainbow Ram' })[type] ?? type;
+export const weaponName = (type) => WEAPONS[type]?.name ?? ({ invincible: 'Rainbow Ram', lava: 'Lava', robot: 'Robot Swarm' })[type] ?? type;
 
 // Admin panel on the north wall (code is checked on the server)
 export const ADMIN_PANEL = { x: 0, z: -29.5, reach: 4 };
 export const INVINCIBLE = { ms: 30000, ramDamage: 10, ramRange: 1.3, ramCooldownMs: 500 };
+
+// Lava Bucket, Robot Swarm, Invisibility Cloak settings
+export const LAVA = { tile: 6, ms: 20000, warnMs: 2000, dps: 10, coverage: 0.5 };
+export const ROBOTS = { count: 10, ms: 20000, speed: 4.5, damage: 10, hitCooldownMs: 1500, riseMs: 1000, reach: 1.0 };
+export const CLOAK_MS = 20000;
 
 // Bomb rain settings
 export const BOMBS = { count: 100, spreadMs: 2500, fuseMs: 3000 };
