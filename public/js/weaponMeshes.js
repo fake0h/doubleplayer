@@ -333,6 +333,32 @@ const BUILDERS = {
     g.add(flames);
     return g;
   },
+  wall_breaker: (c) => {
+    // a chunk of glowing brick wall with a lightning-cracked core
+    const g = new THREE.Group();
+    const brick = mat(0x3a2a55, { roughness: 0.8 });
+    for (let row = 0; row < 3; row++) for (let col = 0; col < 3 - (row % 2); col++) {
+      g.add(part(box(0.26, 0.13, 0.16), brick, (col - (row % 2 ? 0.5 : 1)) * 0.28, 0.08 + row * 0.15, 0));
+    }
+    g.add(part(box(0.75, 0.04, 0.17), glow(c), 0, 0.15, 0));
+    g.add(part(box(0.75, 0.04, 0.17), glow(c), 0, 0.30, 0));
+    const bolt = part(new THREE.OctahedronGeometry(0.12), glow(0xffffff), 0, 0.58, 0);
+    bolt.scale.set(0.6, 1.6, 0.6);
+    g.add(bolt);
+    return g;
+  },
+  bomb: (c) => {
+    const g = new THREE.Group();
+    g.add(part(new THREE.SphereGeometry(0.22, 18, 14), mat(0x15151a, { metalness: 0.6, roughness: 0.35, emissive: 0x000000 }), 0, 0.22, 0));
+    g.add(part(cyl(0.06, 0.07, 0.08, 10), mat(0x777777, { metalness: 0.8 }), 0, 0.46, 0));
+    const fuse = part(new THREE.TorusGeometry(0.08, 0.012, 6, 10, Math.PI), mat(0xd9b37a), 0.08, 0.5, 0, 0, 0, 0);
+    g.add(fuse);
+    const spark = part(new THREE.OctahedronGeometry(0.05), glow(0xffd000), 0.16, 0.5, 0);
+    spark.userData.spark = true;
+    g.add(spark);
+    g.add(part(new THREE.SphereGeometry(0.035, 6, 4), mat(0xffffff, { emissive: 0xffffff, emissiveIntensity: 0.5 }), -0.08, 0.32, -0.17)); // shine
+    return g;
+  },
 };
 
 export function buildWeaponMesh(type) {
@@ -356,5 +382,6 @@ export function animateWeaponMesh(mesh, t) {
       });
     }
     if (o.userData.chain) o.position.z = -0.05 + Math.sin(t * 80) * 0.01;
+    if (o.userData.spark) o.scale.setScalar(0.7 + Math.random() * 0.8);
   });
 }

@@ -48,6 +48,11 @@ export const WEAPONS = {
                     desc: 'Guided missile. Throw from anywhere — it always finds and kills' },
   birthday_cake:  { name: 'Birthday Cake',     kind: 'heal',    damage: 0,  range: 0,  cone: 0,   cooldown: 500,  color: 0xffb6e1, special: true, uses: 1,
                     desc: 'Eat it to restore all your health' },
+  // "instant" specials take effect the moment you pick them up
+  wall_breaker:   { name: 'Wall Breaker',      kind: 'walls',   damage: 0,  range: 0,  cone: 0,   cooldown: 0,    color: 0xa855ff, special: true, instant: true, uses: 1, weight: 1,
+                    desc: 'Raises the maze walls for 30 seconds' },
+  bomb:           { name: 'Bomb',              kind: 'bombs',   damage: 50, range: 2.4, cone: 0,  cooldown: 0,    color: 0xff3030, special: true, instant: true, uses: 1, weight: 2,
+                    desc: '100 bombs rain from the ceiling and explode for 50 damage (you are immune)' },
 };
 
 // ---- Hit area tuning ----
@@ -85,9 +90,17 @@ export function randomWeaponType(rng = Math.random) {
   }
   return NORMAL_IDS[0];
 }
+// Weighted pick among specials (default weight 3; Wall Breaker is the rarest)
 export function randomSpecialType(rng = Math.random) {
-  return SPECIAL_IDS[Math.floor(rng() * SPECIAL_IDS.length)];
+  const wt = (id) => WEAPONS[id].weight ?? 3;
+  const total = SPECIAL_IDS.reduce((s, id) => s + wt(id), 0);
+  let r = rng() * total;
+  for (const id of SPECIAL_IDS) { r -= wt(id); if (r <= 0) return id; }
+  return SPECIAL_IDS[0];
 }
+
+// Bomb rain settings
+export const BOMBS = { count: 100, spreadMs: 2500, fuseMs: 3000 };
 
 // Arena layout (shared so client and server agree)
 export const ARENA = {
@@ -106,6 +119,7 @@ export const ARENA = {
     { x: 25,  z: 25,  r: 1.8 },
   ],
   jumpPadSpeed: 36,  // ~29m up
+  jumpPadMoveSpeed: 0.11, // how fast the jump pads roam around the arena
   airControl: 0.35,  // steering strength while falling from a jump pad (1 = full)
   // Maze walls that rise out of / sink into the floor. Axis-aligned boxes.
   // ax: 'x' = runs along x, 'z' = runs along z. len = length, wall is 0.8 thick, 5 tall.
@@ -113,6 +127,7 @@ export const ARENA = {
   wallThickness: 0.8,
   wallRiseMs: 1500,
   wallCycleMs: 7000,
+  wallsActiveMs: 30000, // walls stay up for 30s after someone grabs a Wall Breaker
   walls: [
     { x: 0,   z: -8,  len: 8, ax: 'x' }, { x: 0,   z: 8,   len: 8, ax: 'x' },
     { x: -16, z: -4,  len: 8, ax: 'z' }, { x: 16,  z: 4,   len: 8, ax: 'z' },
@@ -125,6 +140,15 @@ export const ARENA = {
     { x: 14,  z: 22,  len: 6, ax: 'z' }, { x: -14, z: -22, len: 6, ax: 'z' },
   ],
 };
+
+// Where a roaming jump pad is at time t (seconds). They circle the outer part of the
+// arena on wobbly paths, staying clear of the pressure pads in the middle.
+export function jumpPadPos(i, t) {
+  const sp = ARENA.jumpPadMoveSpeed;
+  const a = t * sp * (i === 0 ? 1 : -0.85) + i * Math.PI + Math.PI / 4;
+  const r = 19 + 5 * Math.sin(t * sp * 2.3 + i * 1.7);
+  return { x: Math.cos(a) * r, z: Math.sin(a) * r };
+}
 
 // Footprint of a wall as an axis-aligned box on the floor
 export function wallBox(w, pad = 0) {

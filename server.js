@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import {
   WEAPONS, USES_PER_WEAPON, MAX_HEALTH, ARENA, FALL_MS, randomWeaponType, HIT_TUNING,
-  randomSpecialType, usesOf, wallBox, wallHeightAt, segmentHitsWalls,
+  randomSpecialType, usesOf, wallBox, wallHeightAt, segmentHitsWalls, jumpPadPos, BOMBS,
 } from './shared/weapons.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -66,10 +66,13 @@ function wallHeights() {
   const t = now();
   return walls.map(w => wallHeightAt(w.up, t - w.changedAt));
 }
+let wallsActiveUntil = 0; // walls only come up after someone grabs a Wall Breaker
+const wallsActive = () => now() < wallsActiveUntil;
 function shuffleWalls() {
   const t = now();
+  const active = wallsActive();
   walls.forEach((w) => {
-    const wantUp = Math.random() < 0.55;
+    const wantUp = active && Math.random() < 0.55;
     if (wantUp !== w.up) {
       // start from wherever it currently is so a half-risen wall doesn't jump
       const cur = wallHeightAt(w.up, t - w.changedAt) / ARENA.wallHeight;
@@ -80,8 +83,24 @@ function shuffleWalls() {
     }
   });
 }
-shuffleWalls();
-setInterval(shuffleWalls, ARENA.wallCycleMs);
+let wallTimer = null;
+function activateWalls(by) {
+  wallsActiveUntil = now() + ARENA.wallsActiveMs;
+  shuffleWalls();
+  clearInterval(wallTimer);
+  wallTimer = setInterval(() => {
+    shuffleWalls();
+    if (!wallsActive()) { clearInterval(wallTimer); wallTimer = null; announce('The maze walls are sinking back into the floor', 2000); }
+  }, ARENA.wallCycleMs);
+  // make sure they sink right at the 30s mark
+  setTimeout(() => { if (!wallsActive()) shuffleWalls(); }, ARENA.wallsActiveMs + 20);
+  announce(`🧱 ${by.name} found the WALL BREAKER — the maze is up for 30 seconds!`, 3000);
+}
+function deactivateWalls() {
+  wallsActiveUntil = 0;
+  clearInterval(wallTimer); wallTimer = null;
+  shuffleWalls();
+}
 
 function insideAnyWall(x, z, margin) {
   return ARENA.walls.some(w => { const b = wallBox(w, margin); return x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1; });
@@ -145,7 +164,7 @@ function announce(text, ms = 2500) { broadcast({ t: 'msg', text, ms }); }
 function specialChance() {
   if (game.phase !== 'fight') return 0;
   const elapsed = (now() - game.fightStartedAt) / 1000;
-  return Math.min(0.14, 0.04 + elapsed / 900);
+  return Math.min(0.28, 0.08 + elapsed / 450);   // twice as common as before
 }
 function spawnWeapon(forceType) {
   const id = nextWeaponId++;
@@ -159,13 +178,14 @@ function spawnWeapon(forceType) {
         || insideAnyWall(x, z, 1.2));
   const specialsOut = [...weapons.values()].filter(w => WEAPONS[w.type].special).length;
   let type = forceType;
-  if (!type) type = (specialsOut < 2 && Math.random() < specialChance()) ? randomSpecialType() : randomWeaponType();
+  if (!type) type = (specialsOut < 3 && Math.random() < specialChance()) ? randomSpecialType() : randomWeaponType();
   weapons.set(id, { id, type, x, z, spin: Math.random() * Math.PI * 2, spawnAt: now() });
   if (WEAPONS[type].special) announce(`★ A SPECIAL weapon is falling: ${WEAPONS[type].name}!`, 3000);
 }
 
 function resetToLobby() {
   game.phase = 'lobby';
+  deactivateWalls();
   game.fighters = [];
   game.winner = null;
   weapons.clear();
@@ -414,6 +434,35 @@ function specialAttack(pl, opp, def, origin, dir) {
   }
 }
 
+// ---------- instant specials ----------
+function useInstant(pl, type) {
+  send(pl.ws, { t: 'picked', weapon: type, instant: true });
+  if (type === 'wall_breaker') return activateWalls(pl);
+  if (type === 'bomb') return bombRain(pl);
+}
+
+function bombRain(owner) {
+  announce(`💣 ${owner.name} found the BOMB — 100 bombs incoming! Find a clear spot!`, 3000);
+  const fightId = game.fightStartedAt;
+  const list = [];
+  for (let i = 0; i < BOMBS.count; i++) {
+    const x = (Math.random() * 2 - 1) * (HALF - 1);
+    const z = (Math.random() * 2 - 1) * (HALF - 1);
+    const delay = Math.round(Math.random() * BOMBS.spreadMs);
+    list.push([+x.toFixed(2), +z.toFixed(2), delay]);
+    setTimeout(() => {
+      if (game.phase !== 'fight' || game.fightStartedAt !== fightId) return;
+      for (const id of game.fighters) {
+        if (id === owner.id) continue; // the bomb's owner is immune to their own bombs
+        const pl = players.get(id);
+        if (!pl || pl.hp <= 0) continue;
+        if (Math.hypot(pl.p[0] - x, pl.p[2] - z) <= WEAPONS.bomb.range && pl.p[1] < 3) damage(pl, WEAPONS.bomb.damage, owner, 'bomb');
+      }
+    }, delay + FALL_MS + BOMBS.fuseMs);
+  }
+  broadcast({ t: 'bombs', owner: owner.id, list, fallMs: FALL_MS, fuseMs: BOMBS.fuseMs, radius: WEAPONS.bomb.range });
+}
+
 function finishUse(pl) {
   if (pl.weapon && pl.weapon.uses <= 0) {
     broadcast({ t: 'broke', id: pl.id, weapon: pl.weapon.type });
@@ -423,16 +472,17 @@ function finishUse(pl) {
 
 function handlePickup(pl, msg) {
   if (game.phase !== 'fight' || !game.fighters.includes(pl.id) || pl.hp <= 0) return;
-  if (pl.weapon) return;
   const t = now();
   let best = null, bestD = 2.6;
   for (const w of weapons.values()) {
     if (t - w.spawnAt < FALL_MS) continue; // still falling
+    if (pl.weapon && !WEAPONS[w.type].instant) continue; // hands full (instant specials still work)
     const d = Math.hypot(w.x - pl.p[0], w.z - pl.p[2]);
     if (d < bestD && (msg.id == null || msg.id === w.id || d < 1.5)) { best = w; bestD = d; }
   }
   if (!best) return;
   weapons.delete(best.id);
+  if (WEAPONS[best.type].instant) return useInstant(pl, best.type);
   pl.weapon = { type: best.type, uses: best.uses ?? usesOf(best.type) };
   pl.lastAttack = 0; // a fresh weapon is ready to use right away
   send(pl.ws, { t: 'picked', weapon: best.type });
@@ -515,6 +565,8 @@ setInterval(() => {
     fighters: game.fighters,
     pads: padOccupants().map(o => o.length > 0),
     walls: walls.map(w => [w.up ? 1 : 0, t - w.changedAt]),
+    wallsLeft: Math.max(0, wallsActiveUntil - t),
+    jumpPads: ARENA.jumpPads.map((_, i) => { const p = jumpPadPos(i, t / 1000); return [+p.x.toFixed(2), +p.z.toFixed(2)]; }),
     players: [...players.values()].map(pl => ({
       id: pl.id, name: pl.name, color: pl.color, p: pl.p, yaw: pl.yaw, pitch: pl.pitch,
       streak: pl.streak, muscle: Math.min(5, pl.streak),

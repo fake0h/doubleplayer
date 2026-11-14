@@ -127,7 +127,8 @@ function updateWalls(t) {
     wm.body.visible = h > 0.02;
     wm.body.scale.y = Math.max(0.001, h);
     const moving = wm.age + (performance.now() - wm.recvAt) < ARENA.wallRiseMs;
-    wm.slot.material.opacity = moving ? 0.5 + Math.sin(t * 20) * 0.3 : (h > 0.1 ? 0.08 : 0.22);
+    const mazeOn = (snap.wallsLeft || 0) > 0;
+    wm.slot.material.opacity = moving ? 0.5 + Math.sin(t * 20) * 0.3 : (h > 0.1 ? 0.08 : (mazeOn ? 0.22 : 0));
     wm.slot.material.color.setHex(moving && wm.up ? 0xff3030 : 0xff3df2);
   });
 }
@@ -159,6 +160,13 @@ const jumpPadMeshes = ARENA.jumpPads.map((jp) => {
   return { g, top, chevrons, light, flash: 0 };
 });
 function updateJumpPads(dt, t) {
+  if (snap.jumpPads) snap.jumpPads.forEach(([x, z], i) => {
+    const jp = jumpPadMeshes[i];
+    if (!jp) return;
+    if (!jp.placed) { jp.g.position.set(x, 0, z); jp.placed = true; }
+    jp.g.position.x += (x - jp.g.position.x) * Math.min(1, dt * 8);
+    jp.g.position.z += (z - jp.g.position.z) * Math.min(1, dt * 8);
+  });
   for (const jp of jumpPadMeshes) {
     jp.chevrons.forEach((c, k) => {
       c.position.y = 0.6 + ((k * 0.9 + t * 2.5) % 3.6);
@@ -327,7 +335,7 @@ function applySnapshot(s) {
     if (!floorWeapons.has(w.id)) {
       const group = new THREE.Group();
       const mesh = buildWeaponMesh(w.type);
-      const upright = ['heal', 'berserk'].includes(WEAPONS[w.type].kind);
+      const upright = ['heal', 'berserk', 'walls', 'bombs'].includes(WEAPONS[w.type].kind);
       mesh.rotation.z = upright ? 0 : Math.PI / 2;   // cakes and helmets sit upright, the rest lie flat
       if (WEAPONS[w.type].kind === 'berserk') mesh.position.y = 0.05;
       mesh.position.y = 0;
@@ -541,7 +549,7 @@ function connect() {
       }
       case 'picked':
         tone(520, 0.08, 'square', 0.08, 300);
-        feed(`You picked up the ${WEAPONS[m.weapon].name}`, '#00e5ff');
+        feed(m.instant ? `You activated the ${WEAPONS[m.weapon].name}!` : `You picked up the ${WEAPONS[m.weapon].name}`, '#00e5ff');
         break;
       case 'broke':
         if (m.id === me.id) feed(`Your ${WEAPONS[m.weapon].name} broke!`, '#ff8c2a');
@@ -554,6 +562,7 @@ function connect() {
         else onAttackFx(m);
         break;
       case 'heal': onHeal(m); break;
+      case 'bombs': onBombs(m); break;
       case 'teleport':
         // berserk launch: fly to the enemy, controls locked during the flurry
         me.dash = { from: me.pos.clone(), to: new THREE.Vector3(...m.p), start: performance.now(), ms: m.launchMs };
@@ -734,6 +743,77 @@ function onHeal(m) {
   feed(`${a?.data.name ?? '?'} ate the Birthday Cake and restored all health!`, '#4cff6a');
 }
 
+// 100 bombs: fall from the ceiling, blink for 3 seconds, explode
+const bombs = [];
+let bombProto = null;
+function onBombs(m) {
+  if (!bombProto) bombProto = buildWeaponMesh('bomb');
+  const t0 = performance.now();
+  const mine = m.owner === me.id;
+  banner(mine ? '💣 BOMBS AWAY! You are immune — chase them into the blasts!' : '💣 100 BOMBS INCOMING — FIND A CLEAR SPOT!', 3000);
+  tone(1200, 0.3, 'square', 0.1, -900);
+  for (const [x, z, delay] of m.list) {
+    const mesh = bombProto.clone(true);
+    // each bomb needs its own body material so it can blink independently
+    const bodyMesh = mesh.children[0];
+    bodyMesh.material = bodyMesh.material.clone();
+    mesh.scale.setScalar(1.6);
+    mesh.position.set(x, ARENA.dropHeight, z);
+    mesh.visible = false;
+    scene.add(mesh);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(m.radius - 0.15, m.radius, 32),
+      new THREE.MeshBasicMaterial({ color: 0xff2020, transparent: true, opacity: 0, side: THREE.DoubleSide, depthWrite: false }));
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(x, 0.04, z);
+    scene.add(ring);
+    bombs.push({ mesh, bodyMat: bodyMesh.material, ring, x, z, start: t0 + delay, fallMs: m.fallMs, fuseMs: m.fuseMs, landed: false });
+  }
+}
+let boomSounds = 0;
+function updateBombs(t) {
+  const now = performance.now();
+  for (let i = bombs.length - 1; i >= 0; i--) {
+    const b = bombs[i];
+    const age = now - b.start;
+    if (age < 0) continue;
+    b.mesh.visible = true;
+    if (age < b.fallMs) {
+      const s = age / 1000;
+      b.mesh.position.y = Math.max(0, ARENA.dropHeight - 0.5 * ARENA.gravity * s * s);
+      b.mesh.rotation.x = s * 5;
+      continue;
+    }
+    if (!b.landed) {
+      b.landed = true;
+      b.mesh.position.y = 0; b.mesh.rotation.set(0, Math.random() * 6, 0);
+      addBurst(new THREE.Vector3(b.x, 0.2, b.z), 0x888888, 4, 2, 0.06, 0.3);
+    }
+    const fuse = (age - b.fallMs) / b.fuseMs;     // 0 -> 1 over 3 seconds
+    if (fuse < 1) {
+      // blink faster and faster as the fuse runs out
+      const rate = 3 + fuse * 14;
+      const on = Math.sin((age / 1000) * rate * Math.PI * 2) > 0;
+      b.bodyMat.emissive.setHex(on ? 0xff0000 : 0x000000);
+      b.bodyMat.emissiveIntensity = on ? 2 : 0;
+      b.ring.material.opacity = on ? 0.7 : 0.2;
+      continue;
+    }
+    // BOOM (lighter effect than a rocket so 100 of them don't slow things down)
+    const pos = new THREE.Vector3(b.x, 0.6, b.z);
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffa020, transparent: true, opacity: 0.85 }));
+    ball.position.copy(pos);
+    ball.scale.setScalar(0.6);
+    scene.add(ball);
+    fx.push({ obj: ball, life: 0.4, max: 0.4, fade: true, grow: 5 });
+    addBurst(pos, Math.random() < 0.5 ? 0xff5000 : 0xffd000, 6, 7, 0.14, 0.6);
+    if (boomSounds < 6) { boomSounds++; noise(0.4, 0.18); setTimeout(() => boomSounds--, 150); }
+    if (Math.hypot(me.pos.x - b.x, me.pos.z - b.z) < 6) shake = Math.max(shake, 0.25);
+    scene.remove(b.mesh); scene.remove(b.ring);
+    b.ring.geometry.dispose(); b.ring.material.dispose(); b.bodyMat.dispose();
+    bombs.splice(i, 1);
+  }
+}
+
 let hitMarkerT = 0;
 function onHit(m) {
   const target = avatars.get(m.target);
@@ -752,7 +832,7 @@ function onHit(m) {
     tone(110, 0.2, 'sawtooth', 0.12, -60);
   }
   if (m.from === me.id) { hitMarkerT = 0.25; tone(1200, 0.05, 'square', 0.06); }
-  if (m.weapon === 'berserk_helmet' || m.weapon === 'poop_bazooka') return; // multi-hit attacks: skip feed spam
+  if (m.weapon === 'berserk_helmet' || m.weapon === 'poop_bazooka' || m.weapon === 'bomb') return; // multi-hit attacks: skip feed spam
   feed(`${avatars.get(m.from)?.data.name ?? '?'} hit ${target?.data.name ?? '?'} with ${def.name} for ${m.dmg}`,
     m.from === me.id ? '#7dff3d' : m.target === me.id ? '#ff6060' : '#c8d8ff');
 }
@@ -771,6 +851,19 @@ function begin() {
   started = true;
   if (!touch.active) renderer.domElement.requestPointerLock?.();
 }
+// Right mouse: click = pick up + jump, hold = run forward
+let rightHeld = false;
+let jumpReq = false;
+renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+renderer.domElement.addEventListener('mousedown', (e) => {
+  if (e.button !== 2 || touch.active || !started) return;
+  e.preventDefault();
+  rightHeld = true;
+  pickup();
+  jumpReq = true;
+});
+addEventListener('mouseup', (e) => { if (e.button === 2) rightHeld = false; });
+addEventListener('blur', () => { rightHeld = false; });
 renderer.domElement.addEventListener('click', () => {
   if (touch.active) return;
   if (started && !locked) renderer.domElement.requestPointerLock?.();
@@ -957,7 +1050,8 @@ function updateLocal(dt) {
     if (Math.hypot(touch.move.x, touch.move.y) > 0.92) sprint = true;
   }
   if (locked && !downed && !lockedOut) {
-    if (keys.KeyW || keys.ArrowUp) move.add(fwd);
+    if (rightHeld) { move.add(fwd); sprint = true; }
+    if ((keys.KeyW || keys.ArrowUp) && !rightHeld) move.add(fwd);
     if (keys.KeyS || keys.ArrowDown) move.sub(fwd);
     if (keys.KeyD || keys.ArrowRight) move.add(right);
     if (keys.KeyA || keys.ArrowLeft) move.sub(right);
@@ -972,8 +1066,9 @@ function updateLocal(dt) {
   }
   if (me.padAir && me.padDrift) me.pos.addScaledVector(me.padDrift, dt);
   collideWalls();
-  if (((locked && keys.Space) || touch.jump) && me.onGround && !downed) { me.velY = ARENA.jumpSpeed; me.onGround = false; tone(300, 0.1, 'triangle', 0.05, 200); }
+  if (((locked && (keys.Space || jumpReq)) || touch.jump) && me.onGround && !downed && !lockedOut) { me.velY = ARENA.jumpSpeed; me.onGround = false; tone(300, 0.1, 'triangle', 0.05, 200); }
   touch.jump = false;
+  jumpReq = false;
   if (touch.attackHeld) attack(); // hold ATTACK to keep swinging/firing
   if (!me.dash) {
     me.velY -= ARENA.gravity * dt;
@@ -988,7 +1083,7 @@ function updateLocal(dt) {
   // corner jump pads
   if (me.onGround && !downed && !me.dash) {
     jumpPadMeshes.forEach((jp, i) => {
-      const pad = ARENA.jumpPads[i];
+      const pad = { x: jp.g.position.x, z: jp.g.position.z, r: ARENA.jumpPads[i].r };  // pads roam around
       if (Math.hypot(me.pos.x - pad.x, me.pos.z - pad.z) < pad.r && me.pos.y < 0.5) {
         me.velY = ARENA.jumpPadSpeed;
         me.onGround = false;
@@ -1044,7 +1139,7 @@ function updateWeapons(dt, t) {
       addBurst(new THREE.Vector3(fw.x, 0.2, fw.z), WEAPONS[fw.type].color, 10, 3, 0.06, 0.4);
       if (Math.hypot(fw.x - me.pos.x, fw.z - me.pos.z) < 25) tone(180, 0.08, 'triangle', 0.05);
     }
-    fw.holder.rotation.x = landed || fw.special && ['heal', 'berserk'].includes(WEAPONS[fw.type].kind) ? 0 : age * 6;
+    fw.holder.rotation.x = landed || fw.special && ['heal', 'berserk', 'walls', 'bombs'].includes(WEAPONS[fw.type].kind) ? 0 : age * 6;
     fw.group.rotation.y += dt * (landed ? 0.8 : 3);
     fw.group.position.y += landed ? Math.sin(t * 3 + id) * 0.08 + 0.1 : 0;
     fw.ring.material.opacity = landed ? (near && near.id === id ? 0.9 : 0.35) : 0;
@@ -1073,7 +1168,7 @@ function updateWeapons(dt, t) {
   for (const a of avatars.values()) if (a.body.held) animateWeaponMesh(a.body.held, t);
 
   // pickup prompt
-  if (near && isFighter() && !me.weapon && snap.phase === 'fight' && me.hp > 0) {
+  if (near && isFighter() && (!me.weapon || WEAPONS[near.type].instant) && snap.phase === 'fight' && me.hp > 0) {
     const d = WEAPONS[near.type];
     ui.prompt.innerHTML = `${touch.active ? 'Tap <b>GRAB</b>' : 'Press <b>E</b>'} to pick up <b style="color:${hex(d.color)}">${d.special ? '★ ' : ''}${d.name}</b> · ${d.special ? d.desc : d.damage + ' dmg'}`;
     ui.prompt.style.display = 'block';
@@ -1155,6 +1250,7 @@ function updateHud() {
       : `Stand on a pressure pad · ${occupied}/2 pads pressed`;
   } else if (snap.phase === 'countdown') status = 'Get ready!';
   else if (snap.phase === 'fight') status = isFighter() ? 'Fight! Pick up weapons and attack' : 'Spectating the match';
+  if (snap.wallsLeft > 0) status += ` · 🧱 Maze: ${Math.ceil(snap.wallsLeft / 1000)}s`;
   else if (snap.phase === 'over') status = 'Match over — back to the lobby soon';
   ui.status.textContent = status;
 
@@ -1206,6 +1302,7 @@ function frame() {
   updateJumpPads(dt, clock.t);
   updateFx(dt);
   updateHoming();
+  updateBombs(clock.t);
   updateCamera(dt);
   updateHud();
   renderer.render(scene, camera);
