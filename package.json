@@ -17,6 +17,7 @@
   },
   "homepage": "https://github.com/fake0h/doubleplayer#readme",
   "dependencies": {
+    "@mediapipe/tasks-vision": "^1.2.3",
     "three": "^0.187.0",
     "ws": "^8.23.0"
   },

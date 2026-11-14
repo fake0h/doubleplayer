@@ -5,7 +5,7 @@ A 2-to-4-player 3D wireframe arena brawler that runs in the browser. **(Touchscr
 Everyone who opens the site appears as a glowing wireframe body in a big neon room split into four quadrants. Two corners hold games:
 
 - **4xPVP** (southwest corner, neon-green pads, big 4xPVP sign): the weapons free-for-all described below.
-- **Say Cheese** (northeast corner, yellow pads, big smiley face): coming soon.
+- **Say Cheese** (northeast corner, yellow pads, big smiley face): a face-making game played with your camera. See below.
 
 The 4xPVP corner has **four pressure pads**. When 2 or more players stand on them, a **3, 2, 1** countdown starts, and anyone who hops on a free pad before it ends joins in. Then weapons rain down from the ceiling and it's a free-for-all. Knocked-out players lie down and watch, and the **last one standing wins**.
 
@@ -14,6 +14,22 @@ The 4xPVP corner has **four pressure pads**. When 2 or more players stand on the
 - **Maze walls** stay sunk in the floor until someone grabs the rare **Wall Breaker**. Then they rise for **30 seconds**, and every 7 seconds a new set comes up, making a fresh maze. Raised walls are **cover**: shots, swings and poop all stop at the wall. You can also land on top of a wall, and you'll drop back to the floor when it sinks. A glowing slot in the floor shows where each wall lives, and it flashes red while a wall is rising.
 - **Jump pads** (four green ones) slowly roam around the arena on an inner and an outer track. Step on one and it flings you about 29m into the air, out over the arena. You get only a little steering on the way down.
 - **Jumping** is high: about 4.4m, enough to see over the action, but not over a raised wall.
+
+## Say Cheese
+
+2 to 4 players stand on the yellow pads. When the countdown ends:
+
+1. Each player's browser asks to use their camera, and the players line up four across facing the back wall (the south wall, opposite the admin panel).
+2. A giant yellow smiley appears on the back wall and calls out an emotion, making that face itself: happy, scared, funny, crazy, excited, sorry, sleepy, and 26 more (33 total).
+3. A 10 to 1 countdown runs while every player's camera rates their face live from 0 to 100. Everyone sees everyone's ratings.
+4. Then **FLASH**: the best face wins the round, and that player's snapshot from their best moment goes up on the back wall.
+5. About 3 seconds later the next round starts. The first player to **3 wins** takes the game. If two players are tied for the lead, rounds continue until one player leads alone.
+
+Face reading uses Google's MediaPipe face tracker, which runs inside each player's own browser. Live video never leaves the device: only the round winner's snapshot is sent to the other players. The server downloads the face model once (from Google) and serves it to players. Players without a camera can still join and watch, but they can't score.
+
+To try Say Cheese without a camera (for testing), open the site with `?fakeface=1` on the end of the address. It uses simulated face scores.
+
+The emotions and what the camera looks for are in `shared/emotions.js`.
 
 ## Weapon wall
 

@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
+import { EMOTION_IDS, emotionById, CHEESE, CHEESE_SPOTS } from './shared/emotions.js';
 import {
   WEAPONS, USES_PER_WEAPON, MAX_HEALTH, ARENA, FALL_MS, randomWeaponType, HIT_TUNING,
   randomSpecialType, usesOf, wallBox, wallHeightAt, segmentHitsWalls, jumpPadPos, BOMBS,
@@ -19,18 +20,44 @@ const ADMIN_CODE = process.env.ADMIN_CODE || '812';
 const MIME = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.png': 'image/png',
-  '.svg': 'image/svg+xml', '.ico': 'image/x-icon',
+  '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.mjs': 'text/javascript; charset=utf-8', '.wasm': 'application/wasm',
 };
 const ROUTES = [
   ['/shared/', path.join(__dirname, 'shared')],
   ['/vendor/three/', path.join(__dirname, 'node_modules', 'three', 'build')],
+  ['/vendor/mediapipe/', path.join(__dirname, 'node_modules', '@mediapipe', 'tasks-vision')],
   ['/', path.join(__dirname, 'public')],
 ];
+
+// Face model for Say Cheese (Google MediaPipe). Downloaded once and kept in memory so every
+// player gets it from this server; if that fails, the browser is sent to Google directly.
+const FACE_MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task';
+let faceModel = null, faceModelPromise = null;
+function loadFaceModel() {
+  if (!faceModelPromise) {
+    faceModelPromise = fetch(FACE_MODEL_URL)
+      .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.arrayBuffer(); })
+      .then(buf => { faceModel = Buffer.from(buf); console.log(`Face model cached (${faceModel.length} bytes)`); })
+      .catch(err => { console.log('Face model download failed, browsers will fetch it from Google:', err.message); faceModelPromise = null; });
+  }
+  return faceModelPromise;
+}
+async function serveFaceModel(res) {
+  if (!faceModel) await loadFaceModel();
+  if (faceModel) {
+    res.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'public, max-age=86400' });
+    return res.end(faceModel);
+  }
+  res.writeHead(302, { Location: FACE_MODEL_URL });
+  res.end();
+}
+loadFaceModel();
 
 const server = http.createServer((req, res) => {
   let urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname);
   if (urlPath === '/') urlPath = '/index.html';
   if (urlPath === '/health') { res.writeHead(200); return res.end('ok'); }
+  if (urlPath === '/models/face_landmarker.task') return serveFaceModel(res);
   for (const [prefix, dir] of ROUTES) {
     if (!urlPath.startsWith(prefix)) continue;
     const file = path.normalize(path.join(dir, urlPath.slice(prefix.length)));
@@ -42,7 +69,7 @@ const server = http.createServer((req, res) => {
       // features like the muscle upgrades to be missing on some screens).
       res.writeHead(200, {
         'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
-        'Cache-Control': prefix === '/vendor/three/' ? 'public, max-age=86400' : 'no-cache',
+        'Cache-Control': prefix.startsWith('/vendor/') ? 'public, max-age=86400' : 'no-cache',
       });
       res.end(data);
     });
@@ -109,6 +136,7 @@ function insideAnyWall(x, z, margin) {
 }
 
 const game = {
+  mode: 'pvp',        // pvp (4xPVP weapons free-for-all) | cheese (Say Cheese)
   phase: 'lobby',     // lobby | countdown | fight | over
   phaseEndsAt: 0,
   fighters: [],       // [idA, idB]
@@ -151,9 +179,10 @@ function onPad(player, pad) {
   return dx * dx + dz * dz <= pad.r * pad.r && player.p[1] < 1.0;
 }
 
-function padOccupants() {
-  return ARENA.pads.map(pad => [...players.values()].filter(pl => onPad(pl, pad)).map(pl => pl.id));
+function padOccupants(padList = ARENA.pads) {
+  return padList.map(pad => [...players.values()].filter(pl => onPad(pl, pad)).map(pl => pl.id));
 }
+const modePads = (mode) => (mode === 'cheese' ? ARENA.cheesePads : ARENA.pads);
 
 // One player per pad, each player counted once. Returns the list of fighters (0-4).
 function padFighters(occ) {
@@ -222,6 +251,9 @@ function spawnWeapon(forceType) {
 
 function resetToLobby() {
   game.phase = 'lobby';
+  game.mode = 'pvp';
+  cheese = null;
+  for (const pl of players.values()) pl.lockUntil = 0;   // release anyone lined up for Say Cheese
   deactivateWalls();
   game.fighters = [];
   game.winner = null;
@@ -263,26 +295,33 @@ function endFight(winnerId, reason) {
 function tickGame() {
   const t = now();
   if (game.phase === 'lobby') {
-    const fighters = padFighters(padOccupants());
-    if (fighters.length >= 2) {
-      game.phase = 'countdown';
-      game.fighters = fighters;
-      game.phaseEndsAt = t + 3000;
-      broadcast({ t: 'countdown', fighters });
+    // green pads start 4xPVP, yellow pads start Say Cheese
+    for (const mode of ['pvp', 'cheese']) {
+      const fighters = padFighters(padOccupants(modePads(mode)));
+      if (fighters.length >= 2) {
+        game.phase = 'countdown';
+        game.mode = mode;
+        game.fighters = fighters;
+        game.phaseEndsAt = t + 3000;
+        broadcast({ t: 'countdown', fighters, mode });
+        break;
+      }
     }
   } else if (game.phase === 'countdown') {
     // players can hop on a free pad to join (or step off to leave) until the countdown ends
-    const fighters = padFighters(padOccupants());
+    const fighters = padFighters(padOccupants(modePads(game.mode)));
     const joined = fighters.filter(id => !game.fighters.includes(id));
-    for (const id of joined) announce(`${players.get(id)?.name} joined the battle!`, 1500);
+    for (const id of joined) announce(`${players.get(id)?.name} joined ${game.mode === 'cheese' ? 'Say Cheese' : 'the battle'}!`, 1500);
     game.fighters = fighters;
     if (fighters.length < 2) {
       game.phase = 'lobby';
       game.fighters = [];
       announce('Countdown cancelled — at least 2 players must stay on the pads', 2500);
     } else if (t >= game.phaseEndsAt) {
-      startFight();
+      if (game.mode === 'cheese') startCheese(); else startFight();
     }
+  } else if (game.phase === 'cheese') {
+    tickCheese(t);
   } else if (game.phase === 'fight') {
     // More weapons fall as the match goes on: interval shrinks and batch size grows.
     if (t >= game.nextDropAt) {
@@ -295,6 +334,88 @@ function tickGame() {
   } else if (game.phase === 'over') {
     if (t >= game.phaseEndsAt) resetToLobby();
   }
+}
+
+// ---------- Say Cheese ----------
+// Players line up facing the back wall, the giant smiley names an emotion, each player's own
+// browser rates their face from their camera (0-100) and reports it. Best face wins the round
+// and their photo goes up on the wall. First to 3 wins (with nobody tied for the lead) wins.
+let cheese = null;
+function cheesePlayers() { return cheese ? cheese.players.filter(cp => players.has(cp.id)) : []; }
+function startCheese() {
+  game.phase = 'cheese';
+  const t = now();
+  cheese = {
+    stage: 'camera', stageEndsAt: t + CHEESE.cameraWaitMs, round: 0, emotion: null, recent: [],
+    players: game.fighters.map((id, i) => ({ id, wins: 0, ready: false, score: 0, best: 0, spot: CHEESE_SPOTS[i] })),
+  };
+  for (const cp of cheese.players) {
+    const pl = players.get(cp.id);
+    if (!pl) continue;
+    pl.p = [cp.spot.x, 0, cp.spot.z];
+    pl.yaw = Math.PI;                      // facing the back wall
+    pl.lockUntil = Infinity;               // stay in line for the whole game
+    pl.weapon = null;
+    send(pl.ws, { t: 'cheeseStart', spot: [cp.spot.x, cp.spot.z] });
+  }
+  announce('🧀 SAY CHEESE! Allow camera access to play', 3000);
+}
+function nextCheeseRound(t) {
+  // pick an emotion we haven't used recently
+  const choices = EMOTION_IDS.filter(id => !cheese.recent.includes(id));
+  const emotion = choices[Math.floor(Math.random() * choices.length)];
+  cheese.recent = [...cheese.recent, emotion].slice(-12);
+  cheese.round++;
+  cheese.emotion = emotion;
+  cheese.stage = 'pose';
+  cheese.stageEndsAt = t + CHEESE.poseMs;
+  cheese.photoFrom = null;
+  for (const cp of cheese.players) { cp.score = 0; cp.best = 0; }
+  broadcast({ t: 'cheeseRound', round: cheese.round, emotion, ms: CHEESE.poseMs });
+}
+function tickCheese(t) {
+  if (!cheese) return;
+  const cps = cheesePlayers();
+  if (cps.length < 2) return endCheese('Not enough players left');
+  if (cheese.stage === 'camera') {
+    if (cps.every(cp => cp.ready) || t >= cheese.stageEndsAt) nextCheeseRound(t);
+  } else if (cheese.stage === 'pose' && t >= cheese.stageEndsAt) {
+    // FLASH: highest score this round wins (ties share the win)
+    const top = Math.max(...cps.map(cp => cp.best));
+    const winners = top > 0 ? cps.filter(cp => cp.best === top) : [];
+    for (const cp of winners) cp.wins++;
+    cheese.stage = 'flash';
+    cheese.stageEndsAt = t + CHEESE.photoWaitMs;
+    cheese.photoFrom = winners[0]?.id ?? null;
+    broadcast({
+      t: 'cheeseFlash', emotion: cheese.emotion, winners: winners.map(cp => cp.id),
+      photoFrom: cheese.photoFrom, scores: cps.map(cp => [cp.id, Math.round(cp.best)]),
+    });
+  } else if (cheese.stage === 'flash' && t >= cheese.stageEndsAt) {
+    cheese.stage = 'reveal';
+    cheese.stageEndsAt = t + CHEESE.revealMs;
+  } else if (cheese.stage === 'reveal' && t >= cheese.stageEndsAt) {
+    const most = Math.max(...cps.map(cp => cp.wins));
+    const leaders = cps.filter(cp => cp.wins === most);
+    if (most >= CHEESE.winsToWin && leaders.length === 1) {
+      const w = players.get(leaders[0].id);
+      return endCheese(`${w.name} won Say Cheese with ${most} wins!`, leaders[0].id);
+    }
+    if (most >= CHEESE.winsToWin) announce(`Tie at ${most} wins — keep going until there's one winner!`, 2500);
+    nextCheeseRound(t);
+  }
+}
+function endCheese(reason, winnerId = null) {
+  if (winnerId == null) {
+    const cps = cheesePlayers().sort((a, b) => b.wins - a.wins);
+    winnerId = cps[0]?.id ?? null;
+  }
+  const w = players.get(winnerId);
+  game.phase = 'over';
+  game.winner = winnerId;
+  game.phaseEndsAt = now() + 7000;
+  broadcast({ t: 'over', mode: 'cheese', winner: winnerId, name: w ? w.name : 'Nobody', reason });
+  if (cheese) cheese.stage = 'done';
 }
 
 // ---------- combat ----------
@@ -658,6 +779,27 @@ wss.on('connection', (ws) => {
         send(ws, { t: 'admin', ok });
         break;
       }
+      case 'cheeseReady': {
+        const cp = cheese?.players.find(c => c.id === pl.id);
+        if (cp) { cp.ready = true; cp.camera = !!msg.camera; }
+        break;
+      }
+      case 'cheeseScore': {
+        const cp = cheese?.players.find(c => c.id === pl.id);
+        if (cp && cheese.stage === 'pose' && Number.isFinite(msg.s)) {
+          cp.score = Math.max(0, Math.min(100, msg.s));
+          cp.best = Math.max(cp.best, cp.score);
+        }
+        break;
+      }
+      case 'cheesePhoto': {
+        // the round winner's snapshot from their best moment, shown on the back wall for everyone
+        if (!cheese || cheese.photoFrom !== pl.id || typeof msg.data !== 'string') break;
+        if (!msg.data.startsWith('data:image/jpeg;base64,') || msg.data.length > 400000) break;
+        cheese.photoFrom = null;
+        broadcast({ t: 'cheesePhoto', id: pl.id, name: pl.name, emotion: cheese.emotion, data: msg.data });
+        break;
+      }
       case 'adminMode': {
         if (!pl.admin) break;
         pl.adminMode = !!msg.on;
@@ -734,6 +876,11 @@ setInterval(() => {
     countdown: game.phase === 'countdown' ? Math.max(0, game.phaseEndsAt - t) : 0,
     fighters: game.fighters,
     pads: padOccupants().map(o => o.length > 0),
+    mode: game.mode,
+    cheese: cheese && game.phase !== 'lobby' ? {
+      stage: cheese.stage, round: cheese.round, emotion: cheese.emotion, left: Math.max(0, cheese.stageEndsAt - t),
+      players: cheesePlayers().map(cp => [cp.id, Math.round(cp.score), Math.round(cp.best), cp.wins, cp.ready ? 1 : 0]),
+    } : null,
     walls: walls.map(w => [w.up ? 1 : 0, t - w.changedAt]),
     wallsLeft: Math.max(0, wallsActiveUntil - t),
     lava: lava ? { mask: lava.mask, age: t - lava.start } : null,

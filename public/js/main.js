@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import { WEAPONS, ARENA, FALL_MS, USES_PER_WEAPON, MAX_HEALTH, usesOf, wallBox, wallHeightAt, weaponName, ADMIN_PANEL, LAVA, ROBOTS, WEAPON_IDS } from '/shared/weapons.js';
 import { WireBody } from './body.js';
 import { buildWeaponMesh, animateWeaponMesh, buildRobot } from './weaponMeshes.js';
+import { Smiley } from './smiley.js';
+import { FaceScorer } from './cheese.js';
+import { emotionById, CHEESE } from '/shared/emotions.js';
 
 // ---------- renderer / scene ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -160,6 +163,8 @@ const jumpPadMeshes = ARENA.jumpPads.map((jp) => {
   return { g, top, chevrons, light, flash: 0 };
 });
 function updateJumpPads(dt, t) {
+  const hide = snap.mode === 'cheese' && (snap.phase === 'cheese' || snap.phase === 'over');
+  for (const jp of jumpPadMeshes) jp.g.visible = !hide;
   if (snap.jumpPads) snap.jumpPads.forEach(([x, z], i) => {
     const jp = jumpPadMeshes[i];
     if (!jp) return;
@@ -370,6 +375,33 @@ const showcase = [];
   title.position.set(0, 6.6, -HALF + 0.1);
   scene.add(title);
 }
+
+// ---------- Say Cheese back wall (south wall, opposite the admin panel) ----------
+const smiley = new Smiley(12);
+smiley.mesh.position.set(-6, 9.5, HALF - 0.1);
+smiley.mesh.rotation.y = Math.PI;
+smiley.mesh.visible = false;
+scene.add(smiley.mesh);
+function textPlane(w, h, pos) {
+  const c = document.createElement('canvas'); c.width = 1024; c.height = Math.round(1024 * h / w);
+  const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+  m.position.copy(pos); m.rotation.y = Math.PI; m.visible = false;
+  scene.add(m);
+  return { mesh: m, canvas: c, tex, draw(fn) { const x = c.getContext('2d'); x.clearRect(0, 0, c.width, c.height); fn(x, c.width, c.height); tex.needsUpdate = true; } };
+}
+const cheeseTitle = textPlane(26, 2.6, new THREE.Vector3(0, 17.2, HALF - 0.1));
+const photoFrame = new THREE.Group();
+photoFrame.position.set(7, 9.5, HALF - 0.1);
+photoFrame.rotation.y = Math.PI;
+photoFrame.visible = false;
+const photoMat = new THREE.MeshBasicMaterial({ color: 0x222222 });
+const photo = new THREE.Mesh(new THREE.PlaneGeometry(11, 8.25), photoMat);
+const photoBorder = new THREE.Mesh(new THREE.PlaneGeometry(11.8, 9.05), new THREE.MeshBasicMaterial({ color: 0xffd400 }));
+photoBorder.position.z = -0.02;
+photoFrame.add(photoBorder, photo);
+scene.add(photoFrame);
+const photoCaption = textPlane(11.8, 1.6, new THREE.Vector3(7, 4.2, HALF - 0.1));
 
 // ---------- pressure pads ----------
 const PVP_GREEN = 0x39ff14, CHEESE_YELLOW = 0xffd400;
@@ -767,7 +799,7 @@ function connect() {
       case 'msg': feed(m.text); break;
       case 'countdown': {
         const names = m.fighters.map(id => avatars.get(id)?.data.name ?? '?');
-        banner(`${names.join(' vs ')}\nOthers: jump on a free pad to join!`, 3000);
+        banner(m.mode === 'cheese' ? `🧀 SAY CHEESE: ${names.join(', ')}\nOthers: hop on a free yellow pad to join!` : `${names.join(' vs ')}\nOthers: jump on a free pad to join!`, 3000);
         break;
       }
       case 'out':
@@ -785,7 +817,7 @@ function connect() {
         const lvl = m.muscle || 0;
         const streakLine = m.streak >= 2 ? `\n${m.streak} wins in a row!` : '';
         const muscleLine = lvl >= 5 ? ' MAX MUSCLE — GLOWING!' : lvl > 0 ? ` Muscle level ${lvl}` : '';
-        banner(`${m.name} WINS!\n${m.reason}${streakLine}\n💪${muscleLine}`, 5500);
+        banner(m.mode === 'cheese' ? `🧀 ${m.name} WINS SAY CHEESE! 🧀\n${m.reason}` : `${m.name} WINS!\n${m.reason}${streakLine}${muscleLine ? `\n💪${muscleLine}` : ''}`, 5500);
         if (lvl > 0) feed(`${m.name} bulked up to muscle level ${lvl}${lvl >= 5 ? ' (MAX — glowing!)' : ''}`, '#ffd23c');
         feed(m.reason, '#ffd23c');
         tone(m.winner === me.id ? 660 : 200, 0.6, 'triangle', 0.15, m.winner === me.id ? 400 : -100);
@@ -819,6 +851,10 @@ function connect() {
       case 'heal': onHeal(m); break;
       case 'bombs': onBombs(m); break;
       case 'admin': onAdminResult(m); break;
+      case 'cheeseStart': onCheeseStart(m); break;
+      case 'cheeseRound': onCheeseRound(m); break;
+      case 'cheeseFlash': onCheeseFlash(m); break;
+      case 'cheesePhoto': onCheesePhoto(m); break;
       case 'adminMode':
         me.adminMode = m.on;
         renderAdminModeBtn();
@@ -1142,6 +1178,140 @@ function onAdminResult(m) {
   }
 }
 
+// ---------- Say Cheese client ----------
+const scorer = new FaceScorer();
+const cheeseEl = { cam: $('cheeseCam'), hud: $('cheeseHud'), emotion: $('cheeseEmotion'), timer: $('cheeseTimer'), board: $('cheeseBoard'),
+  preview: $('cheesePreview'), rating: $('myRating'), note: $('cheeseNote'), flash: $('flash'), camMsg: $('camMsg') };
+let cheeseScoreSent = 0;
+let lastTimerNum = null;
+function inCheeseGame() { return snap.mode === 'cheese' && !!snap.cheese && snap.cheese.players.some(p => p[0] === me.id); }
+function cheeseReady(camera) {
+  send({ t: 'cheeseReady', camera });
+  cheeseEl.cam.style.display = 'none';
+  if (!touch.active) renderer.domElement.requestPointerLock?.();
+}
+async function turnOnCamera() {
+  cheeseEl.camMsg.textContent = 'Asking for your camera…';
+  const ok = await scorer.start();
+  if (!ok) { cheeseEl.camMsg.textContent = 'No camera access — check your browser settings, or play without a camera.'; return; }
+  if (scorer.video && !scorer.video.parentNode) cheeseEl.preview.prepend(scorer.video);
+  cheeseEl.preview.style.display = scorer.video ? 'block' : 'none';
+  if (scorer.status === 'error') {
+    cheeseEl.note.textContent = '⚠️ Face tracking could not load on this device, so your faces can\'t be scored. You can still watch!';
+    cheeseEl.note.style.display = 'block';
+  }
+  cheeseReady(scorer.status === 'ready');
+}
+$('camYes').addEventListener('click', (e) => { e.stopPropagation(); turnOnCamera(); });
+$('camNo').addEventListener('click', (e) => { e.stopPropagation(); cheeseReady(false); });
+
+function onCheeseStart(m) {
+  me.cheeseSpot = m.spot;
+  document.exitPointerLock?.();
+  if (scorer.status === 'ready') { cheeseReady(true); return; }
+  if (scorer.fake) { turnOnCamera(); return; }
+  cheeseEl.camMsg.textContent = '';
+  cheeseEl.cam.style.display = 'flex';
+}
+const aOrAn = (word) => (/^[aeiou]/i.test(word) ? 'AN' : 'A');
+function drawCheeseTitle(text, sub = '') {
+  cheeseTitle.draw((x, W, Hc) => {
+    x.fillStyle = 'rgba(20,14,0,0.8)'; x.fillRect(0, 0, W, Hc);
+    x.strokeStyle = '#ffd400'; x.lineWidth = 8; x.strokeRect(4, 4, W - 8, Hc - 8);
+    x.fillStyle = '#ffd400'; x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.font = '900 52px sans-serif'; x.fillText(text, W / 2, sub ? Hc * 0.38 : Hc / 2, W - 40);
+    if (sub) { x.fillStyle = '#fff'; x.font = 'bold 30px sans-serif'; x.fillText(sub, W / 2, Hc * 0.75, W - 40); }
+  });
+}
+function onCheeseRound(m) {
+  scorer.resetRound();
+  smiley.setEmotion(m.emotion);
+  const name = emotionById(m.emotion)?.name ?? m.emotion;
+  drawCheeseTitle(`ROUND ${m.round}: MAKE ${aOrAn(name)} ${name.toUpperCase()} FACE!`);
+  [523, 659].forEach((f, i) => setTimeout(() => tone(f, 0.12, 'triangle', 0.08), i * 110));
+}
+function onCheeseFlash(m) {
+  smiley.flashT = 1;
+  cheeseEl.flash.style.transition = 'none';
+  cheeseEl.flash.style.opacity = 0.95;
+  requestAnimationFrame(() => { cheeseEl.flash.style.transition = 'opacity 0.8s ease-out'; cheeseEl.flash.style.opacity = 0; });
+  noise(0.15, 0.25); tone(1800, 0.08, 'square', 0.06);
+  const names = m.winners.map(id => avatars.get(id)?.data.name ?? '?');
+  const name = emotionById(m.emotion)?.name ?? '';
+  if (names.length) {
+    banner(`📸 ${names.join(' & ')} ${names.length > 1 ? 'tie' : 'wins'} the round!`, 2500);
+    drawCheeseTitle(`📸 ${names.join(' & ')} made the best ${name.toUpperCase()} face!`);
+  } else {
+    banner('📸 Nobody scored this round!', 2000);
+    drawCheeseTitle('📸 Nobody scored that round!');
+  }
+  // the winner's browser sends the snapshot from their best moment
+  if (m.photoFrom === me.id && scorer.bestPhoto) send({ t: 'cheesePhoto', data: scorer.bestPhoto });
+}
+function onCheesePhoto(m) {
+  const img = new Image();
+  img.onload = () => {
+    const tex = new THREE.Texture(img);
+    tex.colorSpace = THREE.SRGBColorSpace; tex.needsUpdate = true;
+    photoMat.map?.dispose();
+    photoMat.map = tex; photoMat.color.set(0xffffff); photoMat.needsUpdate = true;
+    photoFrame.visible = true;
+  };
+  img.src = m.data;
+  const name = emotionById(m.emotion)?.name ?? m.emotion;
+  photoCaption.draw((x, W, Hc) => {
+    x.fillStyle = '#ffd400'; x.fillRect(0, 0, W, Hc);
+    x.fillStyle = '#1a1400'; x.textAlign = 'center'; x.textBaseline = 'middle';
+    x.font = '900 64px sans-serif'; x.fillText(`${m.name} — ${name.toUpperCase()}`, W / 2, Hc / 2, W - 40);
+  });
+  photoCaption.mesh.visible = true;
+  feed(`📸 ${m.name}'s ${name} face is on the wall!`, '#ffd400');
+}
+function updateCheese(dt, t) {
+  const C = snap.cheese;
+  const show = snap.mode === 'cheese' && (snap.phase === 'cheese' || snap.phase === 'over') && !!C;
+  smiley.mesh.visible = show;
+  cheeseTitle.mesh.visible = show;
+  if (!show) {
+    photoFrame.visible = false; photoCaption.mesh.visible = false;
+    cheeseEl.hud.style.display = 'none';
+    if (snap.phase === 'lobby') {
+      if (me.cheeseSpot) { me.cheeseSpot = null; cheeseEl.cam.style.display = 'none'; cheeseEl.note.style.display = 'none'; cheeseEl.preview.style.display = 'none'; scorer.stop(); }
+      photoMat.map = null; photoMat.color.set(0x222222);
+    }
+    return;
+  }
+  smiley.update(dt, t);
+  cheeseEl.hud.style.display = 'block';
+  const playing = inCheeseGame();
+  // live scoring during the 10-second pose window
+  if (C.stage === 'pose' && playing && (scorer.status === 'ready')) {
+    const sc = scorer.update(C.emotion);
+    if (performance.now() - cheeseScoreSent > 200) { cheeseScoreSent = performance.now(); send({ t: 'cheeseScore', s: Math.round(sc) }); }
+    cheeseEl.rating.textContent = `${Math.round(sc)}${scorer.faceSeen ? '' : ' · no face'}`;
+  }
+  // big countdown 10..1, then FLASH
+  const name = emotionById(C.emotion)?.name ?? '';
+  if (C.stage === 'camera') { cheeseEl.emotion.textContent = 'Waiting for cameras…'; cheeseEl.timer.textContent = Math.ceil(C.left / 1000); drawCheeseTitle('🧀 SAY CHEESE!', 'Players are turning on their cameras…'); }
+  else if (C.stage === 'pose') {
+    const n = Math.max(1, Math.ceil(C.left / 1000));
+    cheeseEl.emotion.textContent = `Make ${aOrAn(name).toLowerCase()} ${name.toUpperCase()} face!`;
+    cheeseEl.timer.textContent = n;
+    if (n !== lastTimerNum) { lastTimerNum = n; if (n <= 3) tone(660 + (3 - n) * 110, 0.1, 'square', 0.07); }
+  } else if (C.stage === 'flash') { cheeseEl.emotion.textContent = 'SAY CHEESE!'; cheeseEl.timer.textContent = '📸'; lastTimerNum = null; }
+  else if (C.stage === 'reveal') { cheeseEl.emotion.textContent = 'Next round coming up…'; cheeseEl.timer.textContent = ''; }
+  else { cheeseEl.emotion.textContent = ''; cheeseEl.timer.textContent = ''; }
+  // live ratings + wins for every player
+  const rows = [...C.players].sort((a, b) => b[3] - a[3] || b[1] - a[1]);
+  cheeseEl.board.innerHTML = `<div style="font-weight:900;color:#ffd400;margin-bottom:8px">LIVE RATINGS · first to ${CHEESE.winsToWin} 🏆</div>` + rows.map(([id, score, best, wins, ready]) => {
+    const p = snap.players.find(x => x.id === id);
+    const nm = p ? p.name : '?';
+    const val = C.stage === 'pose' ? score : best;
+    return `<div class="crow ${id === me.id ? 'me' : ''}"><div class="top"><span style="color:${p ? hex(p.color) : '#fff'}">${nm}${id === me.id ? ' (you)' : ''}${ready ? '' : ' ⏳'}</span><span>${'🏆'.repeat(wins) || '—'} ${val}</span></div>
+      <div class="bar"><div style="width:${val}%"></div></div></div>`;
+  }).join('');
+}
+
 let hitMarkerT = 0;
 function onHit(m) {
   const target = avatars.get(m.target);
@@ -1398,6 +1568,12 @@ function updateLocal(dt) {
   const fwd = new THREE.Vector3(-Math.sin(me.yaw), 0, -Math.cos(me.yaw));
   const right = new THREE.Vector3(Math.cos(me.yaw), 0, -Math.sin(me.yaw));
   const move = new THREE.Vector3();
+  // Say Cheese: stand in line facing the back wall
+  if (me.cheeseSpot && snap.mode === 'cheese' && (snap.phase === 'cheese' || snap.phase === 'over')) {
+    me.pos.set(me.cheeseSpot[0], 0, me.cheeseSpot[1]);
+    me.yaw = Math.PI; me.pitch = 0.32; me.velY = 0;
+    me.lockUntil = performance.now() + 150;
+  }
   const lockedOut = me.lockUntil && performance.now() < me.lockUntil;
   if (me.dash) {
     const k = Math.min(1, (performance.now() - me.dash.start) / me.dash.ms);
@@ -1582,6 +1758,12 @@ function updatePads(dt, t) {
 }
 
 function updateCamera(dt) {
+  // Say Cheese: fixed view from behind and above the line of players, looking at the back wall
+  if (me.cheeseSpot && snap.mode === 'cheese' && (snap.phase === 'cheese' || snap.phase === 'over')) {
+    camera.position.set(0, 4.5, 3.5);
+    camera.lookAt(0.5, 9, HALF);
+    return;
+  }
   const target = me.pos.clone().add(new THREE.Vector3(0, 1.6, 0));
   const f = new THREE.Vector3(-Math.sin(me.yaw) * Math.cos(me.pitch), Math.sin(me.pitch), -Math.cos(me.yaw) * Math.cos(me.pitch));
   const right = new THREE.Vector3(Math.cos(me.yaw), 0, -Math.sin(me.yaw));
@@ -1636,8 +1818,12 @@ function updateHud() {
     const others = snap.players.length - 1;
     status = others < 1 ? 'Waiting for a second player to join… (share this link!)'
       : `4xPVP: stand on a green pad in the southwest corner · ${occupied}/${ARENA.pads.length} pressed`;
-    if (onCheesePad(me.pos.x, me.pos.z, me.pos.y)) status = '🧀 Say Cheese — coming soon!';
-  } else if (snap.phase === 'countdown') status = isFighter() ? 'Get ready!' : 'Battle starting — jump on a free pad to join!';
+    const cheeseOn = ARENA.cheesePads.filter(p => snap.players.some(pl => Math.hypot(pl.p[0] - p.x, pl.p[2] - p.z) <= p.r && pl.p[1] < 1)).length;
+    if (onCheesePad(me.pos.x, me.pos.z, me.pos.y) || cheeseOn) status = `🧀 Say Cheese: stand on a yellow pad · ${cheeseOn}/${ARENA.cheesePads.length} pressed (2-4 players)`;
+  } else if (snap.phase === 'countdown') status = snap.mode === 'cheese'
+    ? (isFighter() ? '🧀 Say Cheese is starting — get your face ready!' : '🧀 Say Cheese starting — hop on a free yellow pad to join!')
+    : (isFighter() ? 'Get ready!' : 'Battle starting — jump on a free pad to join!');
+  else if (snap.phase === 'cheese') status = inCheeseGame() ? `🧀 Say Cheese · round ${snap.cheese?.round || 0}` : '🧀 Watching Say Cheese — look at the back wall!';
   else if (snap.phase === 'fight') {
     const alive = snap.fighters.filter(id => (snap.players.find(p => p.id === id)?.hp ?? 0) > 0).length;
     status = !isFighter() ? 'Spectating the match'
@@ -1654,7 +1840,10 @@ function updateHud() {
   ui.status.textContent = status;
 
   // fighter health bars
-  if (snap.phase === 'fight' || snap.phase === 'over' || snap.phase === 'countdown') {
+  const cheeseOn = snap.mode === 'cheese' && snap.phase !== 'lobby';
+  document.getElementById('me').style.display = cheeseOn && inCheeseGame() ? 'none' : '';
+  document.getElementById('weapon').style.display = cheeseOn ? 'none' : '';
+  if (!cheeseOn && (snap.phase === 'fight' || snap.phase === 'over' || snap.phase === 'countdown')) {
     ui.fighters.style.display = 'flex';
     ui.fighters.classList.toggle('many', snap.fighters.length > 2);
     ui.fighters.innerHTML = snap.fighters.map(id => {
@@ -1711,6 +1900,7 @@ function frame() {
   updateBombs(clock.t);
   updateLava(clock.t);
   updateRobots(dt, clock.t);
+  updateCheese(dt, clock.t);
   updateCamera(dt);
   updateHud();
   renderer.render(scene, camera);
