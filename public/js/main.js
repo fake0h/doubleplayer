@@ -212,8 +212,9 @@ function applySnapshot(s) {
     seen.add(p.id);
     const a = getAvatar(p);
     a.data = p;
+    a.body.setMuscle(p.muscle || 0);
     if (p.id !== me.id) { a.target.set(...p.p); a.yaw = p.yaw; }
-    else { me.hp = p.hp; me.weapon = p.w; me.uses = p.uses; }
+    else { me.hp = p.hp; me.weapon = p.w; me.uses = p.uses; me.streak = p.streak || 0; me.muscle = p.muscle || 0; }
     if (a.weaponType !== p.w) {
       a.weaponType = p.w;
       a.body.setWeapon(p.w ? buildWeaponMesh(p.w) : null, p.w ? WEAPONS[p.w].kind : null);
@@ -394,11 +395,17 @@ function connect() {
         tone(880, 0.4, 'square', 0.12);
         hatchFlash = 1;
         break;
-      case 'over':
-        banner(`${m.name} WINS!\n${m.reason}`, 5500);
+      case 'over': {
+        const lvl = m.muscle || 0;
+        const streakLine = m.streak >= 2 ? `\n${m.streak} wins in a row!` : '';
+        const muscleLine = lvl >= 5 ? ' MAX MUSCLE — GLOWING!' : lvl > 0 ? ` Muscle level ${lvl}` : '';
+        banner(`${m.name} WINS!\n${m.reason}${streakLine}\n💪${muscleLine}`, 5500);
+        if (lvl > 0) feed(`${m.name} bulked up to muscle level ${lvl}${lvl >= 5 ? ' (MAX — glowing!)' : ''}`, '#ffd23c');
         feed(m.reason, '#ffd23c');
         tone(m.winner === me.id ? 660 : 200, 0.6, 'triangle', 0.15, m.winner === me.id ? 400 : -100);
+        if (m.winner === me.id && lvl > 0) setTimeout(() => { for (let i = 0; i < lvl; i++) setTimeout(() => tone(330 + i * 110, 0.12, 'square', 0.08), i * 110); }, 600);
         break;
+      }
       case 'picked':
         tone(520, 0.08, 'square', 0.08, 300);
         feed(`You picked up the ${WEAPONS[m.weapon].name}`, '#00e5ff');
@@ -759,6 +766,9 @@ function updateCamera(dt) {
 function updateHud() {
   // my panel
   ui.hpText.textContent = Math.ceil(me.hp);
+  const lvl = me.muscle || 0;
+  ui.myName.innerHTML = `${me.name}<span style="float:right;font-weight:600;font-size:13px;color:${lvl >= 5 ? '#ffd23c' : '#9fd8ff'}">`
+    + `${lvl > 0 ? `💪 Lv ${lvl}${lvl >= 5 ? ' MAX' : ''} · ${me.streak} win streak` : 'No win streak yet'}</span>`;
   ui.hpBar.style.width = `${me.hp}%`;
   ui.hpBar.style.background = hpColor(me.hp);
   if (me.weapon) {
@@ -807,7 +817,8 @@ function updateHud() {
     a.label.style.left = `${(v.x * 0.5 + 0.5) * innerWidth}px`;
     a.label.style.top = `${(-v.y * 0.5 + 0.5) * innerHeight}px`;
     const nm = a.label.querySelector('.nm');
-    nm.textContent = a.data.name + (a.data.w ? ` · ${WEAPONS[a.data.w].name}` : '');
+    const ml = a.data.muscle || 0;
+    nm.textContent = a.data.name + (ml > 0 ? ` 💪${ml}${ml >= 5 ? ' MAX' : ''}` : '') + (a.data.w ? ` · ${WEAPONS[a.data.w].name}` : '');
     nm.style.color = hex(a.data.color);
     const bar = a.label.querySelector('.mini > div');
     bar.style.width = `${a.data.hp}%`;

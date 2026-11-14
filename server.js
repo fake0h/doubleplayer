@@ -75,6 +75,7 @@ function makePlayer(ws) {
     p: [Math.cos(angle) * 14, 0, Math.sin(angle) * 14 + 8],
     yaw: 0, pitch: 0, moving: false,
     hp: MAX_HEALTH,
+    streak: 0,         // wins in a row; drives muscle level (max 5)
     weapon: null,      // { type, uses }
     lastAttack: 0,
     lastHitAt: 0,
@@ -141,7 +142,14 @@ function endFight(winnerId, reason) {
   game.winner = winnerId;
   game.phaseEndsAt = now() + 6000;
   const w = players.get(winnerId);
-  broadcast({ t: 'over', winner: winnerId, name: w ? w.name : 'Nobody', reason });
+  // win streaks: winner bulks up, loser goes back to level 0
+  for (const id of game.fighters) {
+    const pl = players.get(id);
+    if (!pl) continue;
+    pl.streak = id === winnerId ? pl.streak + 1 : 0;
+  }
+  const streak = w ? w.streak : 0;
+  broadcast({ t: 'over', winner: winnerId, name: w ? w.name : 'Nobody', reason, streak, muscle: Math.min(5, streak) });
 }
 
 function tickGame() {
@@ -357,6 +365,7 @@ setInterval(() => {
     pads: padOccupants().map(o => o.length > 0),
     players: [...players.values()].map(pl => ({
       id: pl.id, name: pl.name, color: pl.color, p: pl.p, yaw: pl.yaw, pitch: pl.pitch,
+      streak: pl.streak, muscle: Math.min(5, pl.streak),
       moving: pl.moving, hp: pl.hp, w: pl.weapon ? pl.weapon.type : null, uses: pl.weapon ? pl.weapon.uses : 0,
     })),
     weapons: [...weapons.values()].map(w => ({ id: w.id, type: w.type, x: w.x, z: w.z, spin: w.spin, age: t - w.spawnAt })),

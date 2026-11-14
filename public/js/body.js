@@ -9,8 +9,23 @@ function limb(radius, length, mat, fillMat) {
   // capsule is centered; shift so the group origin is the top joint
   wire.position.y = fill.position.y = -(length / 2 + radius * 0.6);
   g.add(fill, wire);
+  g.userData.meshes = [fill, wire];
   return g;
 }
+
+// Muscle levels 0..5 (one per win in a streak). Values are girth multipliers.
+const MUSCLE = {
+  upperArm: 0.26,   // biceps grow the most
+  foreArm: 0.17,
+  thigh: 0.14,
+  shin: 0.09,
+  chestW: 0.14,
+  chestD: 0.12,
+  shoulder: 0.05,  // shoulders spread wider (meters per level)
+  neck: 0.18,
+  height: 0.02,
+};
+export const MAX_MUSCLE = 5;
 
 export class WireBody {
   constructor(color) {
@@ -37,11 +52,13 @@ export class WireBody {
     const chestW = new THREE.Mesh(chestGeo, m), chestF = new THREE.Mesh(chestGeo, f);
     chestW.position.y = chestF.position.y = 0.3;
     this.spine.add(chestW, chestF);
+    this.chest = [chestW, chestF];
 
     // neck + head
     const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.12, 8, 1), m);
     neck.position.y = 0.66;
     this.spine.add(neck);
+    this.neck = neck;
     this.head = new THREE.Group();
     this.head.position.y = 0.84;
     const headGeo = new THREE.SphereGeometry(0.15, 14, 10);
@@ -71,7 +88,7 @@ export class WireBody {
       const fist = new THREE.Mesh(new THREE.SphereGeometry(0.065, 8, 6), m);
       hand.add(fist);
       this.spine.add(shoulder);
-      return { shoulder, elbow, hand };
+      return { shoulder, elbow, hand, upper, fore, side };
     };
     this.armL = mkArm(-1);
     this.armR = mkArm(1);
@@ -91,7 +108,7 @@ export class WireBody {
       foot.position.set(0, -0.45, -0.06);
       shin.add(foot);
       this.hips.add(hip);
-      return { hip, knee };
+      return { hip, knee, thigh, shin };
     };
     this.legL = mkLeg(-1);
     this.legR = mkLeg(1);
@@ -101,6 +118,83 @@ export class WireBody {
     this.attackKind = null;
     this.held = null;
     this.flashT = 0;
+
+    // muscles
+    this.muscle = 0;          // current (animated) level
+    this.muscleTarget = 0;
+    this.glow = null;         // built the first time someone hits max level
+    this.applyMuscle(0);
+  }
+
+  setMuscle(level) {
+    this.muscleTarget = Math.max(0, Math.min(MAX_MUSCLE, level));
+  }
+
+  applyMuscle(L) {
+    const girth = (parts, k) => {
+      for (const mesh of parts) mesh.scale.set(1 + k * L, 1, 1 + k * L);
+    };
+    for (const arm of [this.armL, this.armR]) {
+      girth(arm.upper.userData.meshes, MUSCLE.upperArm);
+      girth(arm.fore.userData.meshes, MUSCLE.foreArm);
+      arm.shoulder.position.x = (0.31 + MUSCLE.shoulder * L) * arm.side;
+    }
+    for (const leg of [this.legL, this.legR]) {
+      girth(leg.thigh.userData.meshes, MUSCLE.thigh);
+      girth(leg.shin.userData.meshes, MUSCLE.shin);
+    }
+    for (const c of this.chest) c.scale.set(1 + MUSCLE.chestW * L, 1 + 0.03 * L, 1 + MUSCLE.chestD * L);
+    this.neck.scale.set(1 + MUSCLE.neck * L, 1, 1 + MUSCLE.neck * L);
+    this.root.scale.setScalar(1 + MUSCLE.height * L);
+  }
+
+  buildGlow() {
+    // additive halo shells around every body part + a light that travels with the player
+    this.glowMat = new THREE.MeshBasicMaterial({
+      color: this.color.clone().lerp(new THREE.Color(0xffffff), 0.35), transparent: true, opacity: 0,
+      blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.BackSide,
+    });
+    const shells = [];
+    this.root.traverse((o) => {
+      if (o.isMesh && o.material === this.fillMat) shells.push(o);
+    });
+    for (const o of shells) {
+      const shell = new THREE.Mesh(o.geometry, this.glowMat);
+      shell.scale.setScalar(1.35);
+      o.add(shell);
+    }
+    this.glowLight = new THREE.PointLight(this.color, 0, 7);
+    this.glowLight.position.y = 1.2;
+    this.root.add(this.glowLight);
+    // ring of energy at the feet
+    this.glowRing = new THREE.Mesh(new THREE.RingGeometry(0.6, 0.85, 40),
+      new THREE.MeshBasicMaterial({ color: this.color, transparent: true, opacity: 0, side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending, depthWrite: false }));
+    this.glowRing.rotation.x = -Math.PI / 2;
+    this.glowRing.position.y = 0.05;
+    this.root.add(this.glowRing);
+    this.glow = true;
+  }
+
+  updateMuscleAndGlow(dt) {
+    if (Math.abs(this.muscle - this.muscleTarget) > 0.001) {
+      // grow/shrink smoothly over about half a second
+      this.muscle += (this.muscleTarget - this.muscle) * Math.min(1, dt * 5);
+      if (Math.abs(this.muscle - this.muscleTarget) < 0.01) this.muscle = this.muscleTarget;
+      this.applyMuscle(this.muscle);
+    }
+    const glowing = this.muscle > MAX_MUSCLE - 0.3;
+    if (glowing && !this.glow) this.buildGlow();
+    if (this.glow) {
+      const t = performance.now() / 1000;
+      const on = glowing ? 1 : 0;
+      const pulse = 0.5 + Math.sin(t * 4) * 0.5;
+      this.glowMat.opacity += ((0.22 + pulse * 0.18) * on - this.glowMat.opacity) * Math.min(1, dt * 4);
+      this.glowLight.intensity = on * (3 + pulse * 3);
+      this.glowRing.material.opacity = on * (0.35 + pulse * 0.4);
+      this.glowRing.scale.setScalar(1 + pulse * 0.25);
+      this.fillMat.opacity = this.flashT > 0 ? this.fillMat.opacity : 0.08 + on * 0.12;
+    }
   }
 
   setWeapon(mesh, kind) {
@@ -119,6 +213,7 @@ export class WireBody {
   flash() { this.flashT = 1; }
 
   update(dt, moving, pitch = 0, downed = false) {
+    this.updateMuscleAndGlow(dt);
     const speed = moving ? 9 : 0;
     this.walkPhase += dt * speed;
     const s = Math.sin(this.walkPhase) * (moving ? 0.7 : 0);

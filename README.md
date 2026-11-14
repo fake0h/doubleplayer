@@ -11,6 +11,7 @@ Everyone who opens the site appears as a glowing wireframe body in a big neon ro
 - Every weapon can be used **3 times**, then it breaks and disappears.
 - Damage depends on the weapon. A pool noodle does 2 and a chainsaw does 45.
 - Anyone else who joins can walk around and watch while a match is on.
+- **Win streaks make you muscular.** Each win in a row adds a muscle level, up to **5**: bigger arms, chest, shoulders and legs. At level 5 you start to **glow**. Losing a match (or leaving) resets you to level 0.
 
 ## Weapons (27)
 
