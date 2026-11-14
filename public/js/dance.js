@@ -181,9 +181,8 @@ export const BONES = [[11, 12], [11, 13], [13, 15], [12, 14], [14, 16], [11, 23]
 export class PoseTracker {
   constructor() {
     this.status = 'idle';          // idle | loading | ready | error
-    this.people = [];              // left to right: array of 33 points {x (mirrored), y, v}
-    this.prev = [];
-    this.energy = [];
+    this.tracks = [];              // bodies we're following: { tid, slot (1-4), points, prev, energy, lastSeen }
+    this.nextTid = 1;
     this.last = 0;
     this.fake = new URLSearchParams(location.search).has('fakeface');
     this.fakeT = 0;
@@ -214,58 +213,88 @@ export class PoseTracker {
     }
   }
 
-  // Track bodies and return dance energy (0-100) for each of `count` dancers, left to right.
-  update(video, count) {
+  reset() { this.tracks = []; this.fakeT = 0; }
+
+  // Bodies currently on screen (seen in the last moment), each with a stable id while it stays in view
+  get visible() { const t = performance.now(); return this.tracks.filter(tr => t - tr.lastSeen < 500); }
+
+  // Look for up to 4 bodies, stick to each one we already know, add new ones, drop ones that left.
+  update(video) {
     const t = performance.now();
-    if (this.energy.length !== count) { this.energy = Array(count).fill(0); this.prev = []; }
-    if (t - this.last < 70) return this.energy;
+    if (t - this.last < 70) return this.visible;
     const dt = Math.max(0.03, (t - this.last) / 1000);
     this.last = t;
-    if (this.fake) {
-      // test mode: simulated stick figures, and energy that ramps up to max dancing
-      this.fakePeople(count, dt);
-      for (let i = 0; i < count; i++) {
-        const target = Math.min(100, 40 + this.fakeT * 6 + Math.sin(this.fakeT * 2 + i) * 8);
-        this.energy[i] += (target - this.energy[i]) * 0.3;
-      }
-      return this.energy;
-    }
+    let bodies = [];
+    if (this.fake) bodies = this.fakeBodies(dt);
     else if (this.status === 'ready' && video && video.readyState >= 2) {
       const res = this.landmarker.detectForVideo(video, t);
-      const people = (res.landmarks || []).map(lm => lm.map(p => ({ x: 1 - p.x, y: p.y, v: p.visibility ?? 1 })));
-      const size = (pp) => Math.hypot(pp[11].x - pp[12].x, pp[11].y - pp[12].y);
-      people.sort((a, b) => size(b) - size(a));                        // closest people first
-      this.people = people.slice(0, count).sort((a, b) => (a[23].x + a[24].x) - (b[23].x + b[24].x));  // then left to right
-    } else { this.people = []; }
-    for (let i = 0; i < count; i++) {
-      const p = this.people[i], q = this.prev[i];
-      let e = 0;
-      if (p && q) {
-        const body = Math.max(0.04, Math.hypot(p[11].x - p[12].x, p[11].y - p[12].y));   // shoulder width
-        let sum = 0, n = 0;
-        for (const k of DANCE_POINTS) {
-          if (p[k].v < 0.5 || q[k].v < 0.5) continue;
-          sum += Math.hypot(p[k].x - q[k].x, p[k].y - q[k].y); n++;
-        }
-        const speed = n ? sum / n / body / dt : 0;      // body-widths per second
-        e = Math.max(0, Math.min(100, ((speed - 0.5) / 3.2) * 100));
-      }
-      this.energy[i] = this.energy[i] * 0.7 + e * 0.3;
+      bodies = (res.landmarks || []).map(lm => lm.map(p => ({ x: 1 - p.x, y: p.y, v: p.visibility ?? 1 })));
     }
-    this.prev = this.people.map(p => p.map(pt => ({ ...pt })));
-    return this.energy;
+    const width = (pp) => Math.max(0.02, Math.hypot(pp[11].x - pp[12].x, pp[11].y - pp[12].y));
+    const center = (pp) => ({ x: (pp[11].x + pp[12].x + pp[23].x + pp[24].x) / 4, y: (pp[11].y + pp[12].y + pp[23].y + pp[24].y) / 4 });
+    bodies.sort((a, b) => width(b) - width(a));
+    bodies = bodies.slice(0, 4);
+    // match each body to the nearest track we're already following
+    const free = new Set(this.tracks);
+    const newcomers = [];
+    for (const pp of bodies) {
+      const c = center(pp);
+      let best = null, bd = Math.max(0.15, width(pp) * 2.5);
+      for (const tr of free) {
+        const tc = center(tr.points);
+        const d = Math.hypot(c.x - tc.x, c.y - tc.y);
+        if (d < bd) { bd = d; best = tr; }
+      }
+      if (best) {
+        free.delete(best);
+        best.prev = best.points; best.points = pp; best.lastSeen = t;
+        if (!this.fake) best.energy = best.energy * 0.7 + this.energyOf(best.points, best.prev, dt) * 0.3;
+      } else newcomers.push(pp);
+    }
+    // new bodies walked in: number them left to right with the lowest free dancer numbers
+    newcomers.sort((a, b) => center(a).x - center(b).x);
+    for (const pp of newcomers) {
+      if (this.tracks.length >= 4) break;
+      const used = new Set(this.tracks.map(tr => tr.slot));
+      const slot = [1, 2, 3, 4].find(n => !used.has(n));
+      this.tracks.push({ tid: this.nextTid++, slot, points: pp, prev: null, energy: 0, lastSeen: t, born: t });
+    }
+    // bodies that left the picture: let go of them after a moment
+    for (const tr of free) tr.energy *= 0.85;
+    this.tracks = this.tracks.filter(tr => t - tr.lastSeen < 900);
+    if (this.fake) for (const tr of this.tracks) {
+      const target = Math.min(100, 40 + (t - tr.born) / 1000 * 6 + Math.sin(t / 500 + tr.slot) * 8);
+      tr.energy += (target - tr.energy) * 0.3;
+    }
+    return this.visible;
   }
 
-  // simulated dancers for testing (?fakeface=1): skeletons that dance harder over time
-  fakePeople(count, dt) {
+  // dance energy 0-100 from how fast head, hands, elbows, knees and feet moved, relative to body size
+  energyOf(p, q, dt) {
+    if (!q) return 0;
+    const body = Math.max(0.04, Math.hypot(p[11].x - p[12].x, p[11].y - p[12].y));
+    let sum = 0, n = 0;
+    for (const k of DANCE_POINTS) {
+      if (p[k].v < 0.5 || q[k].v < 0.5) continue;
+      sum += Math.hypot(p[k].x - q[k].x, p[k].y - q[k].y); n++;
+    }
+    const speed = n ? sum / n / body / dt : 0;   // body-widths per second
+    return Math.max(0, Math.min(100, ((speed - 0.5) / 3.2) * 100));
+  }
+
+  // simulated dancers for testing (?fakeface=1): 3 bodies, a 4th walks in, one walks out and back
+  fakeBodies(dt) {
     this.fakeT += dt;
-    const amp = Math.min(1, 0.3 + this.fakeT / 14);
-    this.people = Array.from({ length: count }, (_, i) => {
-      const cx = (i + 0.5) / count, ph = this.fakeT * 6 + i;
+    const T = this.fakeT;
+    const present = [0.2, 0.45, 0.7].filter((_, i) => !(i === 1 && T > 20 && T < 26));
+    if (T > 12) present.push(0.9);
+    return present.map((cx, i) => {
+      const ph = T * 6 + i * 1.3, amp = Math.min(1, 0.3 + T / 14);
       const s = Math.sin(ph) * amp, c = Math.cos(ph) * amp;
+      cx += Math.sin(T * 0.4 + i) * 0.03;
       const pts = Array.from({ length: 33 }, () => ({ x: cx, y: 0.5, v: 1 }));
       const set = (k, x, y) => { pts[k] = { x, y, v: 1 }; };
-      const w = 0.12 / Math.max(1, count / 2), bob = Math.abs(s) * 0.02;
+      const w = 0.07, bob = Math.abs(s) * 0.02;
       set(0, cx + s * 0.02, 0.22 + bob);
       set(11, cx - w / 2, 0.34 + bob); set(12, cx + w / 2, 0.34 + bob);
       set(13, cx - w, 0.34 - s * 0.12 + bob); set(14, cx + w, 0.34 + s * 0.12 + bob);

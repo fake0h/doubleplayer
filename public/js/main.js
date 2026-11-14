@@ -1507,7 +1507,7 @@ function drawFaceBoxes(local, posing) {
 
 // Local game: avatars for players 2-4 (they don't have their own device)
 function camGamePlayers() {
-  if (snap.mode === 'disco' && snap.disco) return snap.disco.players.map(p => ({ id: p[0], energy: p[1], score: p[2], name: p[4], virtual: !!p[5] }));
+  if (snap.mode === 'disco' && snap.disco) return snap.disco.dancers.slice(0, DISCO.spots.length).map(d => ({ id: d[0], energy: d[1], score: d[2], name: d[3], virtual: true }));
   if (snap.cheese) return snap.cheese.players.map(p => ({ id: p[0], name: p[5], virtual: !!p[6] }));
   return [];
 }
@@ -1531,7 +1531,7 @@ function updateVirtualAvatars(dt) {
       v = { body, label };
       virtualAvatars.set(id, v);
     }
-    applyDiscoToBody(v.body, id, i);
+    applyDiscoToBody(v.body, id);
     v.body.update(dt, false, 0.2, false);
     applyBlown(v.body.root, i, spotsList[i]);
     const pos = v.body.root.position.clone().add(new THREE.Vector3(0, 2.25, 0)).project(camera);
@@ -1555,7 +1555,7 @@ function danceVideoOn() {
     danceVideo.play().catch(() => {});
   }
 }
-function drawDanceOverlay(names, energies) {
+function drawDanceOverlay(tracks, scoreOf) {
   const W = innerWidth, Hh = innerHeight;
   if (danceCanvas.width !== W || danceCanvas.height !== Hh) { danceCanvas.width = W; danceCanvas.height = Hh; }
   const x = danceCanvas.getContext('2d');
@@ -1564,8 +1564,9 @@ function drawDanceOverlay(names, energies) {
   const vw = danceVideo.videoWidth || 1280, vh = danceVideo.videoHeight || 720;
   const sc = Math.max(W / vw, Hh / vh), dw = vw * sc, dh = vh * sc, ox = (W - dw) / 2, oy = (Hh - dh) / 2;
   const P = (pt) => [ox + pt.x * dw, oy + pt.y * dh];
-  pose.people.forEach((pp, i) => {
-    const col = names.length > 1 ? hex(VIRTUAL_COLORS[i % 4]) : hex(me.color);
+  for (const tr of tracks) {
+    const pp = tr.points;
+    const col = hex(VIRTUAL_COLORS[(tr.slot - 1) % 4]);
     const body = Math.hypot((pp[11].x - pp[12].x) * dw, (pp[11].y - pp[12].y) * dh);
     x.lineCap = 'round'; x.lineJoin = 'round';
     x.shadowColor = col; x.shadowBlur = 18;
@@ -1589,23 +1590,26 @@ function drawDanceOverlay(names, energies) {
       x.beginPath(); x.arc(px, py, Math.max(6, body * 0.1), 0, Math.PI * 2); x.fill();
     }
     x.shadowBlur = 0;
-    // name + energy bar floating above the head
-    const e = Math.round(energies[i] || 0);
-    const bw = Math.max(110, body * 1.4), bx = hx - bw / 2, by = Math.max(210, hy - hr - 46);   // stay below the top HUD
-    x.font = 'bold 18px system-ui, sans-serif'; x.textAlign = 'center';
-    x.fillStyle = '#000'; x.fillText(names[i] || '', hx + 1, by + 1); x.fillStyle = col; x.fillText(names[i] || '', hx, by);
-    x.fillStyle = 'rgba(0,0,0,0.55)'; x.fillRect(bx, by + 8, bw, 14);
-    x.fillStyle = e >= DISCO.maxEnergy ? '#ffd400' : col; x.fillRect(bx, by + 8, bw * e / 100, 14);
-    x.strokeStyle = '#fff'; x.lineWidth = 2; x.strokeRect(bx, by + 8, bw, 14);
-  });
+    // name, energy bar and score floating above the head
+    const e = Math.round(tr.energy || 0), name = `Dancer ${tr.slot}`, score = scoreOf(tr.tid);
+    const bw = Math.max(120, body * 1.4), bx = hx - bw / 2, by = Math.max(215, hy - hr - 52);
+    x.font = 'bold 20px system-ui, sans-serif'; x.textAlign = 'center';
+    const label = score != null ? `${name} · ${score}` : name;
+    x.fillStyle = '#000'; x.fillText(label, hx + 1, by + 1); x.fillStyle = col; x.fillText(label, hx, by);
+    x.fillStyle = 'rgba(0,0,0,0.55)'; x.fillRect(bx, by + 8, bw, 16);
+    x.fillStyle = e >= DISCO.maxEnergy ? '#ffd400' : col; x.fillRect(bx, by + 8, bw * e / 100, 16);
+    x.strokeStyle = '#fff'; x.lineWidth = 2; x.strokeRect(bx, by + 8, bw, 16);
+  }
 }
 let music = null;
 let energySent = 0, discoFacesSent = 0;
 let blownAt = 0;                       // when the dance floor exploded
 const danceTags = new Map();           // id -> label element under each dancer
 const discoEl = { hud: $('discoHud'), meter: document.querySelector('#discoMeter > div'), hint: $('discoHint'), title: $('discoTitle'), tags: $('danceTags') };
-function inDiscoGame() { return snap.mode === 'disco' && !!snap.disco && snap.disco.players.some(p => p[0] === me.id); }
-function discoIndex(id) { return snap.disco ? snap.disco.players.findIndex(p => p[0] === id) : -1; }
+function inDiscoGame() { return snap.mode === 'disco' && !!snap.disco && snap.disco.devices.includes(me.id); }
+function discoOn() { return snap.mode === 'disco' && !!snap.disco && (snap.phase === 'disco' || snap.phase === 'over'); }
+// during Disco the people on camera are shown as dancing avatars; the players' own avatars step aside
+function hiddenForDisco(id) { return discoOn() && snap.disco.devices.includes(id); }
 function onDiscoGo() {
   if (!actx) { try { actx = new AudioContext(); } catch {} }
   if (actx && !music) music = new DiscoMusic(actx);
@@ -1637,16 +1641,16 @@ function applyBlown(root, i, spot) {
   root.position.y = t < 3.1 ? h : Math.max(0, h);
   root.rotation.x = t * 6; root.rotation.z = t * 4 * (i % 2 ? 1 : -1);
 }
-function applyDiscoToBody(body, id, i) {
+function applyDiscoToBody(body, key) {
   const D = snap.disco;
-  if (snap.mode !== 'disco' || !D || (snap.phase !== 'disco' && snap.phase !== 'over')) { body.dance = 0; body.partyGlow = 0; return; }
-  const p = D.players.find(q => q[0] === id);
-  body.dance = D.stage === 'dance' || D.stage === 'boom' ? Math.max(15, p ? p[1] : 0) : 15;
+  if (!discoOn()) { body.dance = 0; body.partyGlow = 0; return; }
+  const d = D.dancers.find(q => q[0] === key);
+  body.dance = D.stage === 'dance' || D.stage === 'boom' ? Math.max(15, d ? d[1] : 0) : 15;
   body.partyGlow = Math.max(0, (D.hype - 0.35) / 0.65);
 }
 function updateDisco(dt, t) {
   const D = snap.disco;
-  const show = snap.mode === 'disco' && (snap.phase === 'disco' || snap.phase === 'over') && !!D;
+  const show = discoOn();
   disco.g.visible = show;
   if (snap.mode === 'disco') updateVirtualAvatars(dt);
   if (!show) {
@@ -1655,44 +1659,40 @@ function updateDisco(dt, t) {
     danceView.classList.remove('fade');
     if (music && music.timer) music.stop();
     blownAt = 0;
+    pose.reset();
     for (const [, el] of danceTags) el.remove();
     danceTags.clear();
     return;
   }
   const playing = inDiscoGame();
-  const local = !!D.local && D.host === me.id;
-  // camera: same-camera games report when every dancer's face is visible
-  const count = local ? (localIds?.length || 1) : 1;
   const hasCam = !!scorer.video || pose.fake;
-  // live video of the dancers fills the screen while we dance (fades out when the floor explodes)
-  const videoMode = playing && hasCam && ['count', 'camera', 'dance', 'boom'].includes(D.stage);
+  cheeseEl.hud.style.display = 'none';
+  // live video of the dancers fills the screen (fades out when the floor explodes)
+  const videoMode = playing && hasCam && ['camera', 'dance', 'boom'].includes(D.stage);
   danceView.style.display = videoMode ? 'block' : 'none';
   if (D.stage === 'boom') danceView.classList.add('fade');
   if (videoMode) danceVideoOn();
-  // track bodies (stick figures) during the warm-up and the dance
-  let en = null;
+  // find bodies (up to 4) and stick to them; report each one's dancing
+  let tracks = [];
   if (playing && hasCam && (D.stage === 'camera' || D.stage === 'dance')) {
-    en = pose.status === 'ready' ? pose.update(danceVideo.readyState >= 2 ? danceVideo : scorer.video, count)
-      : meter.update(scorer.video, count, local ? scorer.faces : null);
-  }
-  // same-camera games: ready once every dancer is visible
-  const seenDancers = pose.status === 'ready' ? pose.people.length : (scorer.status === 'ready' ? (scorer.detect(), scorer.faces.length) : count);
-  if (local && performance.now() - discoFacesSent > 300 && (pose.status === 'ready' || scorer.status === 'ready' || scorer.status === 'error')) {
-    discoFacesSent = performance.now();
-    send({ t: 'cheeseFaces', ok: seenDancers >= count });
-  }
-  cheeseEl.hud.style.display = 'none';
-  // report dancing
-  if (D.stage === 'dance' && en && performance.now() - energySent > 200) {
-    energySent = performance.now();
-    send(local ? { t: 'danceEnergy', energies: en.map(Math.round) } : { t: 'danceEnergy', e: Math.round(en[0]) });
+    const src = danceVideo.readyState >= 2 ? danceVideo : scorer.video;
+    if (pose.status === 'ready') tracks = pose.update(src);
+    else if (pose.status === 'error' && scorer.video) {
+      // body tracking unavailable on this device: score the whole picture as one dancer
+      const en = meter.update(scorer.video, 1, null);
+      tracks = [{ tid: 1, slot: 1, energy: en[0], points: null }];
+    }
+    if (performance.now() - energySent > 200) {
+      energySent = performance.now();
+      send({ t: 'danceBodies', bodies: tracks.map(tr => [tr.tid, tr.slot, Math.round(tr.energy)]) });
+    }
   }
   if (videoMode) {
-    const names = local ? camGamePlayers().map(p => p.name) : [me.name];
-    drawDanceOverlay(names, en || pose.energy);
+    const scoreOf = (tid) => { const d = D.dancers.find(q => q[0] === `${me.id}:${tid}`); return d ? d[2] : null; };
+    drawDanceOverlay(tracks.filter(tr => tr.points), scoreOf);
   }
   // music follows the dancing
-  const avg = D.players.length ? D.players.reduce((a, p) => a + p[1], 0) / D.players.length / 100 : 0;
+  const avg = D.dancers.length ? D.dancers.reduce((a, d) => a + d[1], 0) / D.dancers.length / 100 : 0;
   if (music && D.stage === 'dance') { if (!music.timer) music.start(); music.setLevel(avg, D.hype); }
   // the room pulses with the beat, harder as the party meter fills
   const beat = Math.pow(Math.max(0, Math.cos(t * Math.PI * 2 * 2)), 8);      // 120 BPM pulse
@@ -1713,39 +1713,41 @@ function updateDisco(dt, t) {
   });
   if (roomEdges) roomEdges.material.color.setHSL((t * 0.2) % 1, 1, 0.5 + beat * 0.3 * hype);
   scene.background.setRGB(0.02 + beat * hype * 0.25, 0.02 + beat * hype * 0.05, 0.04 + beat * hype * 0.2);
-  // HUD: party meter + score bars under each dancer
+  // HUD: party meter + every dancer's score, always on top of the video
   discoEl.hud.style.display = 'block';
   discoEl.meter.style.width = `${Math.round(hype * 100)}%`;
-  const slackers = D.players.filter(p => p[1] < DISCO.maxEnergy).map(p => p[4]);
-  discoEl.title.textContent = D.stage === 'camera' || D.stage === 'count' ? '🪩 GET READY TO DANCE 🪩' : D.stage === 'boom' ? '💥 BOOM! 💥' : hype > 0.66 ? '🔥 KEEP GOING!! 🔥' : '🪩 JUST DANCE! 🪩';
-  discoEl.hint.textContent = D.stage === 'camera' && local ? (seenDancers >= count ? `✅ Found all ${count} dancers — get ready!` : `Step back so the camera can see your whole body · found ${seenDancers} of ${count} dancers`)
-    : D.stage === 'camera' ? 'Step back so the camera can see your whole body'
-    : D.stage !== 'dance' ? '' : slackers.length ? `Dance harder: ${slackers.join(', ')}` : 'EVERYONE IS MAX DANCING — the party meter is filling!';
-  const spotsList = DISCO.spots;
-  const seen = new Set();
-  D.players.forEach(([id, energy, score, , name], i) => {
-    seen.add(id);
-    let el = danceTags.get(id);
+  const found = playing ? tracks.length : D.dancers.length;
+  const slackers = D.dancers.filter(d => d[1] < DISCO.maxEnergy).map(d => d[3]);
+  discoEl.title.textContent = D.stage === 'camera' ? '🪩 GET READY TO DANCE 🪩' : D.stage === 'boom' ? '💥 BOOM! 💥' : hype > 0.66 ? '🔥 KEEP GOING!! 🔥' : '🪩 JUST DANCE! 🪩';
+  discoEl.hint.textContent = D.stage === 'camera' ? `Get in front of the camera · looking for up to 4 dancers · found ${found}`
+    : D.stage !== 'dance' ? ''
+    : !D.dancers.length ? 'No dancers found — step in front of the camera!'
+    : slackers.length ? `Dance harder: ${slackers.join(', ')}` : 'EVERYONE IS MAX DANCING — the party meter is filling!';
+  const seenTags = new Set();
+  D.dancers.forEach(([key, energy, score, name], i) => {
+    seenTags.add(key);
+    let el = danceTags.get(key);
     if (!el) {
       el = document.createElement('div'); el.className = 'danceTag';
       el.innerHTML = `<div class="nm"></div><div class="bar"><div></div></div><div class="score"></div>`;
-      discoEl.tags.appendChild(el); danceTags.set(id, el);
+      discoEl.tags.appendChild(el); danceTags.set(key, el);
     }
-    if (videoMode) {
-      // over the live video: a row of score bars along the bottom
-      el.style.left = `${((i + 0.5) / D.players.length) * innerWidth}px`;
+    if (videoMode || i >= DISCO.spots.length) {
+      // a row of score bars along the bottom of the screen
+      el.style.left = `${((i + 0.5) / D.dancers.length) * innerWidth}px`;
       el.style.top = `${innerHeight - 92}px`;
     } else {
-      const p = new THREE.Vector3(spotsList[i].x, -0.15, spotsList[i].z).project(camera);
+      const sp = DISCO.spots[i];
+      const p = new THREE.Vector3(sp.x, -0.15, sp.z).project(camera);
       el.style.left = `${(p.x * 0.5 + 0.5) * innerWidth}px`;
       el.style.top = `${(-p.y * 0.5 + 0.5) * innerHeight}px`;
     }
     el.style.display = blownAt ? 'none' : 'block';
-    el.querySelector('.nm').textContent = name + (id === me.id ? ' (you)' : '');
+    el.querySelector('.nm').textContent = name;
     el.querySelector('.bar > div').style.width = `${energy}%`;
     el.querySelector('.score').textContent = score;
   });
-  for (const [id, el] of danceTags) if (!seen.has(id)) { el.remove(); danceTags.delete(id); }
+  for (const [key, el] of danceTags) if (!seenTags.has(key)) { el.remove(); danceTags.delete(key); }
 }
 function showDiscoResults(m) {
   const standings = m.standings || [];
@@ -2155,9 +2157,9 @@ function updateLocal(dt) {
   if (a) {
     a.body.root.position.copy(me.pos);
     a.body.root.rotation.y = me.yaw;
-    applyDiscoToBody(a.body, me.id, discoIndex(me.id));
+    a.body.dance = 0; a.body.partyGlow = 0;
     a.body.update(dt, me.moving, me.pitch, downed);
-    if (discoIndex(me.id) >= 0) applyBlown(a.body.root, discoIndex(me.id), DISCO.spots[discoIndex(me.id)]);
+    a.body.root.visible = !hiddenForDisco(me.id);
     // you can still see yourself while cloaked, as a faint ghost
     const ghost = me.cloak > 0;
     a.body.mat.opacity = ghost ? 0.25 : 0.95;
@@ -2173,11 +2175,9 @@ function updateRemotes(dt) {
     dy = Math.atan2(Math.sin(dy), Math.cos(dy));
     a.body.root.rotation.y += dy * Math.min(1, dt * 12);
     const downed = a.data.hp <= 0 && snap.fighters.includes(id) && snap.phase !== 'lobby';
-    applyDiscoToBody(a.body, id, discoIndex(id));
+    a.body.dance = 0; a.body.partyGlow = 0;
     a.body.update(dt, a.data.moving, a.data.pitch, downed);
-    a.body.root.visible = !a.cloaked;   // invisibility cloak: other players can't see you
-    const di = discoIndex(id);
-    if (di >= 0) applyBlown(a.body.root, di, DISCO.spots[di]);
+    a.body.root.visible = !a.cloaked && !hiddenForDisco(id);   // cloaked, or stepping aside for the Disco dancers
   }
 }
 

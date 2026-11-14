@@ -351,64 +351,47 @@ function tickGame() {
 }
 
 // ---------- Dance Dance Disco ----------
-// Players line up in the middle of the room and dance for their camera. Each browser measures how
-// much its player is moving (0-100 "energy"). Scores build up while you dance. The party meter only
-// fills while EVERYONE is max dancing; when it's full the dance floor explodes and everyone wins.
+// Each player's device runs its camera and looks for up to 4 bodies. Every body it finds becomes a
+// dancer (it sticks to that body until it leaves the picture) and reports how hard it's dancing
+// (0-100). Bodies can come and go at any time. Scores build up while you dance. The party meter
+// fills while EVERY body on screen is max dancing; when it's full the floor explodes and everyone wins.
 let disco = null;
-function discoPlayers() {
-  if (!disco) return [];
-  if (disco.local) return players.has(disco.host) ? disco.players : [];
-  return disco.players.filter(dp => players.has(dp.id));
+const DANCER_TIMEOUT_MS = 1200;   // a body that hasn't been reported for this long has left the picture
+function discoDevices() { return disco ? disco.devices.filter(id => players.has(id)) : []; }
+function visibleDancers(t = now()) {
+  return disco ? [...disco.dancers.values()].filter(d => t - d.lastSeen < DANCER_TIMEOUT_MS && players.has(d.owner)) : [];
 }
 function startDisco() {
   game.phase = 'disco';
   const t = now();
-  const solo = game.fighters.length === 1;
   disco = {
-    stage: solo ? 'count' : 'camera', stageEndsAt: t + (solo ? 30000 : DISCO.cameraWaitMs),
-    local: solo, host: solo ? game.fighters[0] : null, facesOk: !solo, hype: 0, danceStart: 0, lastTick: t,
-    players: game.fighters.map((id, i) => ({ id, name: players.get(id)?.name ?? '?', ready: false, energy: 0, score: 0, spot: DISCO.spots[i] })),
+    stage: 'camera', stageEndsAt: t + DISCO.cameraWaitMs, hype: 0, danceStart: 0, lastTick: t,
+    devices: [...game.fighters], ready: new Set(), dancers: new Map(),
   };
-  for (const dp of disco.players) {
-    const pl = players.get(dp.id);
-    if (pl) lineUp(pl, dp.spot, { local: solo, game: 'disco' });
-  }
-  announce(solo ? '🪩 DANCE DANCE DISCO! How many dancers are in front of the camera?' : '🪩 DANCE DANCE DISCO! Turn on your camera and get ready to dance', 3000);
-}
-function setDiscoCount(n) {
-  if (!disco?.local || disco.stage !== 'count') return;
-  n = Math.max(2, Math.min(4, Math.round(n) || 2));
-  disco.players = Array.from({ length: n }, (_, i) => ({
-    id: i === 0 ? disco.host : `v${disco.host}-${i + 1}`, name: `Dancer ${i + 1}`, virtual: i > 0,
-    ready: false, energy: 0, score: 0, spot: DISCO.spots[i],
-  }));
-  disco.stage = 'camera';
-  disco.stageEndsAt = now() + DISCO.cameraWaitMs;
-  disco.facesOk = false;
-  const host = players.get(disco.host);
-  if (host) send(host.ws, { t: 'cheeseCount', n, ids: disco.players.map(dp => dp.id) });
-  announce(`🪩 ${n} dancers! Line up side by side in front of the camera`, 3000);
+  game.fighters.forEach((id, i) => {
+    const pl = players.get(id);
+    if (pl) lineUp(pl, DISCO.spots[i % DISCO.spots.length], { game: 'disco' });
+  });
+  announce('🪩 DANCE DANCE DISCO! Get in front of the camera — up to 4 dancers per camera', 3000);
 }
 function tickDisco(t) {
   if (!disco) return;
   const dt = Math.min(0.25, (t - disco.lastTick) / 1000);
   disco.lastTick = t;
-  const dps = discoPlayers();
-  if (dps.length < (disco.local ? 1 : 2) && disco.stage !== 'boom') return endDisco(false, 'Not enough dancers left');
-  if (disco.stage === 'count') { if (t >= disco.stageEndsAt) setDiscoCount(2); return; }
+  if (!discoDevices().length && disco.stage !== 'boom') return endDisco(false, 'Everyone left the dance floor');
   if (disco.stage === 'camera') {
-    const ok = disco.local ? disco.facesOk && dps[0].ready : dps.every(dp => dp.ready);
-    if (ok || t >= disco.stageEndsAt) {
+    if (discoDevices().every(id => disco.ready.has(id)) || t >= disco.stageEndsAt) {
       disco.stage = 'dance';
       disco.danceStart = t;
       broadcast({ t: 'discoGo' });
-      announce('🪩 JUST DANCE! Everyone max dancing fills the party meter!', 3000);
+      announce('🪩 JUST DANCE! When everyone on screen is max dancing, the party meter fills!', 3000);
     }
     return;
   }
   if (disco.stage === 'dance') {
-    for (const dp of dps) dp.score += dp.energy * dt / 10;
-    const allMax = dps.every(dp => dp.energy >= DISCO.maxEnergy);
+    const vis = visibleDancers(t);
+    for (const d of vis) d.score += d.energy * dt / 10;
+    const allMax = vis.length > 0 && vis.every(d => d.energy >= DISCO.maxEnergy);
     disco.hype = Math.max(0, Math.min(1, disco.hype + (allMax ? dt / DISCO.hypeRiseSec : -dt / DISCO.hypeFallSec)));
     if (disco.hype >= 1) {
       disco.stage = 'boom';
@@ -422,7 +405,9 @@ function tickDisco(t) {
   if (disco.stage === 'boom' && t >= disco.stageEndsAt) endDisco(true, 'The dance floor EXPLODED — everybody wins!');
 }
 function endDisco(boom, reason) {
-  const standings = (disco?.players || []).map(dp => [dp.id, dp.name, Math.round(dp.score)]).sort((a, b) => b[2] - a[2]);
+  const stillHere = new Set(visibleDancers().map(d => d.key));
+  const standings = [...(disco?.dancers.values() || [])].filter(d => d.score >= 1)
+    .map(d => [d.key, stillHere.has(d.key) ? d.name : `${d.name} (left)`, Math.round(d.score)]).sort((a, b) => b[2] - a[2]).slice(0, 8);
   game.phase = 'over';
   game.winner = boom ? 'everyone' : standings[0]?.[0] ?? null;
   game.phaseEndsAt = now() + 10000;
@@ -949,7 +934,7 @@ wss.on('connection', (ws) => {
         break;
       }
       case 'cheeseCount':
-        if (game.mode === 'disco') { if (disco?.local && disco.host === pl.id) setDiscoCount(msg.n); break; }
+        if (game.mode === 'disco') break;   // Disco doesn't ask how many players
         if (cheese?.local && cheese.host === pl.id) setLocalCount(msg.n);
         break;
       case 'cheeseFaces': {
@@ -959,16 +944,30 @@ wss.on('connection', (ws) => {
         break;
       }
       case 'cheeseReady': {
-        const g = game.mode === 'disco' ? disco : cheese;
-        const cp = g?.players.find(c => c.id === pl.id);
+        if (game.mode === 'disco') { if (disco?.devices.includes(pl.id)) disco.ready.add(pl.id); break; }
+        const cp = cheese?.players.find(c => c.id === pl.id);
         if (cp) { cp.ready = true; cp.camera = !!msg.camera; }
         break;
       }
-      case 'danceEnergy': {
-        if (!disco || disco.stage !== 'dance') break;
-        const set = (dp, v) => { if (dp && Number.isFinite(v)) dp.energy = Math.max(0, Math.min(100, v)); };
-        if (disco.local && disco.host === pl.id && Array.isArray(msg.energies)) disco.players.forEach((dp, i) => set(dp, msg.energies[i]));
-        else set(disco.players.find(d => d.id === pl.id), msg.e);
+      case 'danceBodies': {
+        // the bodies this device's camera sees right now: [trackId, slot (1-4), energy]
+        if (!disco || !disco.devices.includes(pl.id) || !Array.isArray(msg.bodies)) break;
+        if (disco.stage !== 'dance' && disco.stage !== 'camera') break;
+        const multi = discoDevices().length > 1;
+        for (const b of msg.bodies.slice(0, 4)) {
+          if (!Array.isArray(b)) continue;
+          const [tid, slot, e] = b;
+          if (!Number.isFinite(tid) || !Number.isFinite(slot) || !Number.isFinite(e)) continue;
+          const key = `${pl.id}:${tid}`;
+          let d = disco.dancers.get(key);
+          if (!d) {
+            d = { key, owner: pl.id, tid, slot, score: 0, energy: 0, lastSeen: 0, name: multi ? `${pl.name} · Dancer ${slot}` : `Dancer ${slot}` };
+            disco.dancers.set(key, d);
+          }
+          d.slot = slot;
+          d.energy = disco.stage === 'dance' ? Math.max(0, Math.min(100, e)) : 0;
+          d.lastSeen = now();
+        }
         break;
       }
       case 'cheeseScore': {
@@ -1067,9 +1066,10 @@ setInterval(() => {
     pads: padOccupants().map(o => o.length > 0),
     mode: game.mode,
     disco: disco && game.phase !== 'lobby' ? {
-      stage: disco.stage, hype: +disco.hype.toFixed(3), left: Math.max(0, disco.stageEndsAt - t), local: disco.local, host: disco.host,
-      elapsed: disco.danceStart ? t - disco.danceStart : 0,
-      players: discoPlayers().map(dp => [dp.id, Math.round(dp.energy), Math.round(dp.score), dp.ready || disco.local ? 1 : 0, dp.name, dp.virtual ? 1 : 0]),
+      stage: disco.stage, hype: +disco.hype.toFixed(3), left: Math.max(0, disco.stageEndsAt - t),
+      elapsed: disco.danceStart ? t - disco.danceStart : 0, devices: discoDevices(),
+      dancers: visibleDancers(t).sort((a, b) => a.owner - b.owner || a.slot - b.slot)   // Dancer 1, 2, 3, 4 per camera
+        .map(d => [d.key, Math.round(d.energy), Math.round(d.score), d.name, d.owner, d.slot]),
     } : null,
     cheese: cheese && game.phase !== 'lobby' ? {
       stage: cheese.stage, round: cheese.round, emotion: cheese.emotion, left: Math.max(0, cheese.stageEndsAt - t),
