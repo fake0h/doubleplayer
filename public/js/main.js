@@ -914,6 +914,7 @@ function connect() {
       case 'cheeseCount': onCheeseCount(m); break;
       case 'discoGo': onDiscoGo(); break;
       case 'discoBoom': onDiscoBoom(); break;
+      case 'dancePhoto': discoPhotos[m.key] = m.data; break;
       case 'cheeseRound': onCheeseRound(m); break;
       case 'cheeseFlash': onCheeseFlash(m); break;
       case 'cheesePhoto': onCheesePhoto(m); break;
@@ -1592,25 +1593,48 @@ function drawDanceOverlay(tracks, scoreOf) {
     x.shadowBlur = 0;
     // name, energy bar and score floating above the head
     const e = Math.round(tr.energy || 0), name = `Dancer ${tr.slot}`, score = scoreOf(tr.tid);
-    const bw = Math.max(120, body * 1.4), bx = hx - bw / 2, by = Math.max(215, hy - hr - 52);
+    const bw = Math.max(120, body * 1.4), by = Math.max(215, hy - hr - 52);
+    const lx = Math.max(bw / 2 + 8, Math.min(W - bw / 2 - 8, hx)), bx = lx - bw / 2;   // keep the label on screen
     x.font = 'bold 20px system-ui, sans-serif'; x.textAlign = 'center';
     const label = score != null ? `${name} · ${score}` : name;
-    x.fillStyle = '#000'; x.fillText(label, hx + 1, by + 1); x.fillStyle = col; x.fillText(label, hx, by);
-    x.fillStyle = 'rgba(0,0,0,0.55)'; x.fillRect(bx, by + 8, bw, 16);
-    x.fillStyle = e >= DISCO.maxEnergy ? '#ffd400' : col; x.fillRect(bx, by + 8, bw * e / 100, 16);
-    x.strokeStyle = '#fff'; x.lineWidth = 2; x.strokeRect(bx, by + 8, bw, 16);
+    x.fillStyle = '#000'; x.fillText(label, lx + 1, by + 1); x.fillStyle = col; x.fillText(label, lx, by);
+    x.fillStyle = 'rgba(0,0,0,0.55)'; x.fillRect(bx, by + 8, bw, 12);
+    x.fillStyle = e >= DISCO.maxEnergy ? '#ffd400' : col; x.fillRect(bx, by + 8, bw * e / 100, 12);
+    x.strokeStyle = '#fff'; x.lineWidth = 2; x.strokeRect(bx, by + 8, bw, 12);
   }
 }
 let music = null;
 let energySent = 0, discoFacesSent = 0;
 let blownAt = 0;                       // when the dance floor exploded
 const danceTags = new Map();           // id -> label element under each dancer
+let discoPhotos = {};                  // dancer key -> snapshot of that dancer
+const snapCanvas = document.createElement('canvas'); snapCanvas.width = snapCanvas.height = 128;
+// close-up of one dancer (head and shoulders), mirrored like the video
+function snapDancer(tr) {
+  const c = snapCanvas.getContext('2d');
+  const pp = tr.points;
+  if (danceVideo.readyState >= 2 && danceVideo.videoWidth) {
+    const vw = danceVideo.videoWidth, vh = danceVideo.videoHeight;
+    const sw = Math.hypot((pp[11].x - pp[12].x) * vw, (pp[11].y - pp[12].y) * vh);
+    const cx = (pp[0].x * 0.6 + (pp[11].x + pp[12].x) / 2 * 0.4) * vw, cy = (pp[0].y * 0.7 + (pp[11].y + pp[12].y) / 2 * 0.3) * vh;
+    const size = Math.max(60, Math.min(Math.min(vw, vh), sw * 2.2));
+    const sx = Math.max(0, Math.min(vw - size, cx - size / 2)), sy = Math.max(0, Math.min(vh - size, cy - size / 2));
+    c.save(); c.translate(128, 0); c.scale(-1, 1);
+    c.drawImage(danceVideo, vw - sx - size, sy, size, size, 0, 0, 128, 128);   // x is mirrored: flip back to pick the region
+    c.restore();
+  } else {
+    c.fillStyle = hex(VIRTUAL_COLORS[(tr.slot - 1) % 4]); c.fillRect(0, 0, 128, 128);
+    c.fillStyle = '#000'; c.font = 'bold 44px sans-serif'; c.textAlign = 'center'; c.fillText(`D${tr.slot}`, 64, 80);
+  }
+  return snapCanvas.toDataURL('image/jpeg', 0.75);
+}
 const discoEl = { hud: $('discoHud'), meter: document.querySelector('#discoMeter > div'), hint: $('discoHint'), title: $('discoTitle'), tags: $('danceTags') };
 function inDiscoGame() { return snap.mode === 'disco' && !!snap.disco && snap.disco.devices.includes(me.id); }
 function discoOn() { return snap.mode === 'disco' && !!snap.disco && (snap.phase === 'disco' || snap.phase === 'over'); }
 // during Disco the people on camera are shown as dancing avatars; the players' own avatars step aside
 function hiddenForDisco(id) { return discoOn() && snap.disco.devices.includes(id); }
 function onDiscoGo() {
+  discoPhotos = {};
   if (!actx) { try { actx = new AudioContext(); } catch {} }
   if (actx && !music) music = new DiscoMusic(actx);
   if (actx?.state === 'suspended') actx.resume();
@@ -1686,6 +1710,13 @@ function updateDisco(dt, t) {
       energySent = performance.now();
       send({ t: 'danceBodies', bodies: tracks.map(tr => [tr.tid, tr.slot, Math.round(tr.energy)]) });
     }
+    // a second after we find a dancer, snap their picture to show next to their score
+    if (D.stage === 'dance') for (const tr of tracks) {
+      if (tr.points && !tr.photoSent && performance.now() - tr.born > 1000 && D.dancers.some(d => d[0] === `${me.id}:${tr.tid}`)) {
+        tr.photoSent = true;
+        send({ t: 'dancePhoto', tid: tr.tid, data: snapDancer(tr) });
+      }
+    }
   }
   if (videoMode) {
     const scoreOf = (tid) => { const d = D.dancers.find(q => q[0] === `${me.id}:${tid}`); return d ? d[2] : null; };
@@ -1719,30 +1750,33 @@ function updateDisco(dt, t) {
   const found = playing ? tracks.length : D.dancers.length;
   const slackers = D.dancers.filter(d => d[1] < DISCO.maxEnergy).map(d => d[3]);
   discoEl.title.textContent = D.stage === 'camera' ? '🪩 GET READY TO DANCE 🪩' : D.stage === 'boom' ? '💥 BOOM! 💥' : hype > 0.66 ? '🔥 KEEP GOING!! 🔥' : '🪩 JUST DANCE! 🪩';
+  document.getElementById('discoMeterLabel').textContent = `PARTY METER · ${Math.min(D.total || 0, D.goal || 500)} / ${D.goal || 500} POINTS`;
   discoEl.hint.textContent = D.stage === 'camera' ? `Get in front of the camera · looking for up to 4 dancers · found ${found}`
     : D.stage !== 'dance' ? ''
     : !D.dancers.length ? 'No dancers found — step in front of the camera!'
-    : slackers.length ? `Dance harder: ${slackers.join(', ')}` : 'EVERYONE IS MAX DANCING — the party meter is filling!';
+    : slackers.length ? `Dance harder to score faster: ${slackers.join(', ')}` : 'EVERYONE IS MAX DANCING — points are flying in!';
   const seenTags = new Set();
   D.dancers.forEach(([key, energy, score, name], i) => {
     seenTags.add(key);
     let el = danceTags.get(key);
     if (!el) {
       el = document.createElement('div'); el.className = 'danceTag';
-      el.innerHTML = `<div class="nm"></div><div class="bar"><div></div></div><div class="score"></div>`;
+      el.innerHTML = `<img class="face" alt=""><div class="info"><div class="nm"></div><div class="bar"><div></div></div><div class="score"></div></div>`;
       discoEl.tags.appendChild(el); danceTags.set(key, el);
     }
+    const img = el.querySelector('.face');
+    if (discoPhotos[key] && img.src !== discoPhotos[key]) { img.src = discoPhotos[key]; img.style.display = 'block'; }
     if (videoMode || i >= DISCO.spots.length) {
       // a row of score bars along the bottom of the screen
       el.style.left = `${((i + 0.5) / D.dancers.length) * innerWidth}px`;
-      el.style.top = `${innerHeight - 92}px`;
+      el.style.top = `${innerHeight - 78}px`;
     } else {
       const sp = DISCO.spots[i];
       const p = new THREE.Vector3(sp.x, -0.15, sp.z).project(camera);
       el.style.left = `${(p.x * 0.5 + 0.5) * innerWidth}px`;
       el.style.top = `${(-p.y * 0.5 + 0.5) * innerHeight}px`;
     }
-    el.style.display = blownAt ? 'none' : 'block';
+    el.style.display = blownAt ? 'none' : 'flex';   // photo beside the name, bar and score
     el.querySelector('.nm').textContent = name;
     el.querySelector('.bar > div').style.width = `${energy}%`;
     el.querySelector('.score').textContent = score;
@@ -1755,8 +1789,9 @@ function showDiscoResults(m) {
   document.querySelector('#cheeseResults h2').textContent = m.boom ? '💥 DANCE DANCE DISCO — EVERYBODY WINS! 💥' : '🪩 DANCE DANCE DISCO — RESULTS';
   $('resultsSub').textContent = m.reason || '';
   const medals = ['🥇', '🥈', '🥉', '4️⃣'];
-  $('resultsRows').innerHTML = standings.map(([id, name, score], i) => `<div class="rrow ${i === 0 ? 'first' : ''}"><div class="place">${m.boom ? '🏆' : medals[i] || i + 1}</div><div class="nm">${name}</div>
-    <div class="track"><div class="bar" style="width:0%;background:linear-gradient(90deg,#00e5ff,#ff3df2)" data-w="${Math.max(6, (score / top) * 100)}"></div></div><div class="wins">${score}</div></div>`).join('');
+  document.querySelectorAll('.rrow').forEach(r => r.style.gridTemplateColumns = '');
+  $('resultsRows').innerHTML = standings.map(([id, name, score], i) => `<div class="rrow ${i === 0 ? 'first' : ''}" style="grid-template-columns:60px 260px 1fr 70px"><div class="place">${m.boom ? '🏆' : medals[i] || i + 1}</div><div class="nm">${discoPhotos[id] ? `<img src="${discoPhotos[id]}" alt="">` : ''}${name}</div>
+    <div class="track" style="height:84px"><div class="bar" style="width:0%;background:linear-gradient(90deg,#00e5ff,#ff3df2)" data-w="${Math.max(6, (score / top) * 100)}"></div></div><div class="wins">${score}</div></div>`).join('');
   resultsEl.style.display = 'block';
   requestAnimationFrame(() => requestAnimationFrame(() => resultsEl.querySelectorAll('.bar').forEach(b => { b.style.width = b.dataset.w + '%'; })));
 }

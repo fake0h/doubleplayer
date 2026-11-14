@@ -2,7 +2,8 @@
 export const DISCO = {
   // players line up in the middle of the room, facing the camera (toward the south wall)
   spots: [{ x: 4.5, z: 0 }, { x: 1.5, z: 0 }, { x: -1.5, z: 0 }, { x: -4.5, z: 0 }],
-  maxEnergy: 80,        // a player counts as "max dancing" at this energy (0-100) or above
+  goalPoints: 500,      // the party meter fills as the dancers' combined points reach this, then BOOM
+  maxEnergy: 80,        // energy (0-100) shown as "max dancing" (gold bar)
   hypeRiseSec: 14,      // seconds of everyone max dancing to fill the party meter
   hypeFallSec: 7,       // seconds for a full meter to drain if someone stops
   boomMs: 4500,         // explosion + flying through the air

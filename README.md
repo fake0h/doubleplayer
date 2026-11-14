@@ -50,13 +50,13 @@ The emotions and what the camera looks for are in `shared/emotions.js`.
 Stand on the blue pads (or press **Play now** when you're alone) and the music starts. No faces, and no "how many players" question: the camera just looks for bodies.
 
 1. Your **live camera feed fills the screen**. The game looks for **up to 4 bodies** and draws a glowing **stick figure** on each one it finds (head, arms, body, legs, hands and feet), using Google's MediaPipe body tracker.
-2. **Every body it finds becomes a dancer** (Dancer 1-4, numbered left to right) and the game **sticks to that body** while it moves around, scoring points the whole time. Each dancer's name, score and energy bar float above their head, and score bars for everyone run along the bottom. The **party meter** stays on top.
+2. **Every body it finds becomes a dancer** (Dancer 1-4, numbered left to right) and the game **sticks to that body** while it moves around, scoring points the whole time. Each dancer's name, score and energy bar float above their head. Along the bottom, everyone has a score bar with a **snapshot of their face** next to it, taken a second after the camera finds them. The **party meter** stays on top.
 3. **Bodies can come and go.** Walk out and you drop off. Walk in and you become a new dancer with a free number. The game plays with however many bodies it can find.
 4. Energy comes from how fast your head, hands, elbows, knees and feet move, measured against your body size, so you have to really dance. The disco music (made live in the browser) gets louder and fuller as everyone dances harder.
-5. The **party meter** fills while **every body on screen** is dancing at max (80+ energy). It takes about 14 seconds of everyone going all out, and drains quickly if anyone slacks. As it fills, the room pulses, the dancers glow, and the music swells.
-6. When it's full: **BOOM!** The video fades away, the dance floor explodes, everyone is blown into the air, and **everybody wins**. A results chart shows every dancer's score.
+5. The **party meter** fills as the dancers' **combined points** build up to **500** (points from dancers who walked out still count). The harder everyone dances, the faster it fills: two people dancing at full energy fill it in about half a minute. As it fills, the room pulses, the dancers glow, and the music swells.
+6. At 500 points: **BOOM!** The video fades away, the dance floor explodes, everyone is blown into the air, and **everybody wins**. A results chart shows every dancer's photo and score.
 
-Several players can also each join from their own device: every camera finds its own dancers, and the party meter needs all of them at max. Spectators see one dancing avatar per dancer in the 3D room. If the floor hasn't exploded after 2½ minutes, the music stops. Settings are in `shared/disco.js`. Add `?fakeface=1` to the address to try it with simulated dancers (3 dancers, a 4th walks in, one walks out and back).
+Several players can also each join from their own device: every camera finds its own dancers, and all their points fill the same party meter. Spectators see one dancing avatar per dancer in the 3D room. If the floor hasn't exploded after 2½ minutes, the music stops. Settings are in `shared/disco.js`. Add `?fakeface=1` to the address to try it with simulated dancers (3 dancers, a 4th walks in, one walks out and back).
 
 ## Weapon wall
 

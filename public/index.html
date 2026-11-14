@@ -179,10 +179,13 @@
   #discoMeter { height: 22px; border-radius: 11px; background: rgba(255,255,255,0.12); overflow: hidden; border: 2px solid rgba(255,255,255,0.4); }
   #discoMeter > div { height: 100%; width: 0%; background: linear-gradient(90deg, #ff3df2, #ffd400, #fff); transition: width 0.2s; }
   #discoHint { margin-top: 6px; font-weight: 700; text-shadow: 0 0 6px #000; }
-  .danceTag { position: absolute; transform: translate(-50%, 0); width: 108px; text-align: center; font-weight: 800; font-size: 13px; text-shadow: 0 0 4px #000; }
-  .danceTag .bar { height: 12px; background: rgba(255,255,255,0.15); border-radius: 6px; overflow: hidden; margin: 3px 0; border: 1px solid rgba(255,255,255,0.4); }
+  .danceTag { position: absolute; transform: translate(-50%, -50%); width: 170px; display: flex; align-items: center; gap: 8px; font-weight: 800; font-size: 13px; text-shadow: 0 0 4px #000; }
+  .danceTag .face { width: 54px; height: 54px; border-radius: 10px; object-fit: cover; border: 3px solid #fff; background: #223; flex: 0 0 auto; display: none; }
+  .danceTag .info { flex: 1; text-align: center; min-width: 0; }
+  .danceTag .bar { height: 9px; background: rgba(255,255,255,0.15); border-radius: 6px; overflow: hidden; margin: 3px 0; border: 1px solid rgba(255,255,255,0.4); }
   .danceTag .bar > div { height: 100%; background: linear-gradient(90deg, #00e5ff, #ff3df2); transition: width 0.15s; }
   .danceTag .score { font-size: 18px; color: #ffd400; }
+  .rrow .nm img { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; border: 3px solid #fff; vertical-align: middle; margin-right: 8px; }
   #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 30; transition: opacity 0.6s ease-out; }
   /* ---------- invites ---------- */
   #padPanel { position: fixed; left: 50%; top: 110px; transform: translateX(-50%); display: none; z-index: 7; text-align: center; pointer-events: auto; }
