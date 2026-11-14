@@ -137,6 +137,7 @@ function makePlayer(ws) {
     lastHitAt: 0,
     lockUntil: 0,      // berserk lunge: server owns position until this time
     admin: false,      // unlocked the admin panel
+    adminMode: false,  // admin mode on: clicking weapons on the weapon wall gives them to you
     adminTries: 0,
     invincibleUntil: 0,
     lastRam: 0,
@@ -657,19 +658,19 @@ wss.on('connection', (ws) => {
         send(ws, { t: 'admin', ok });
         break;
       }
-      case 'cheat': {
+      case 'adminMode': {
         if (!pl.admin) break;
-        if (msg.action === 'spear') {
-          pl.weapon = { type: 'fire_spear', uses: usesOf('fire_spear') };
-          pl.lastAttack = 0;
-          send(ws, { t: 'picked', weapon: 'fire_spear' });
-          announce(`🛠️ ${pl.name} summoned a fake0h Fire Spear from the admin panel!`, 2500);
-        } else if (msg.action === 'bombs') {
-          bombRain(pl);
-        } else if (msg.action === 'invincible') {
-          pl.invincibleUntil = now() + INVINCIBLE.ms;
-          announce(`🌈 ${pl.name} is INVINCIBLE for 30 seconds — don't let them touch you!`, 3000);
-        }
+        pl.adminMode = !!msg.on;
+        send(ws, { t: 'adminMode', on: pl.adminMode });
+        break;
+      }
+      case 'giveWeapon': {
+        // admin mode: take any weapon off the weapon wall
+        if (!pl.admin || !pl.adminMode || !WEAPONS[msg.type]) break;
+        if (WEAPONS[msg.type].instant) { useInstant(pl, msg.type); break; }
+        pl.weapon = { type: msg.type, uses: usesOf(msg.type) };
+        pl.lastAttack = 0;
+        send(ws, { t: 'picked', weapon: msg.type });
         break;
       }
       case 'debugSpawn':

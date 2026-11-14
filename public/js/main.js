@@ -321,7 +321,8 @@ const showcase = [];
     const g = new THREE.Group();
     g.position.set(x, y, -HALF + 0.08);
     const frameCol = def.special ? 0xffd23c : 0x00e5ff;
-    const back = new THREE.Mesh(new THREE.PlaneGeometry(W, Hh), new THREE.MeshStandardMaterial({ color: 0x0b1020, roughness: 0.9 }));
+    const back = new THREE.Mesh(new THREE.PlaneGeometry(W, Hh), new THREE.MeshStandardMaterial({ color: 0x0b1020, roughness: 0.9, emissive: 0x000000 }));
+    back.userData.weaponType = id;   // admin mode: click a frame to take this weapon
     g.add(back);
     const bar = (w, h, px, py) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, 0.08), new THREE.MeshBasicMaterial({ color: frameCol })); m.position.set(px, py, 0.03); g.add(m); };
     bar(W + 0.08, 0.06, 0, Hh / 2); bar(W + 0.08, 0.06, 0, -Hh / 2); bar(0.06, Hh, -W / 2, 0); bar(0.06, Hh, W / 2, 0);
@@ -355,7 +356,7 @@ const showcase = [];
       g.add(l);
     }
     scene.add(g);
-    showcase.push({ holder, mesh });
+    showcase.push({ holder, mesh, back, id });
   });
 })();
 // big title above the showcase
@@ -818,6 +819,12 @@ function connect() {
       case 'heal': onHeal(m); break;
       case 'bombs': onBombs(m); break;
       case 'admin': onAdminResult(m); break;
+      case 'adminMode':
+        me.adminMode = m.on;
+        renderAdminModeBtn();
+        feed(m.on ? '🛠️ Admin mode ON — aim at a weapon on the weapon wall and click it' : 'Admin mode OFF', '#ffd23c');
+        if (m.on) setTimeout(closeAdmin, 400);
+        break;
       case 'blocked': {
         const a = avatars.get(m.target);
         if (a) addBurst(a.body.root.position.clone().add(new THREE.Vector3(0, 1.2, 0)), 0xffffff, 8, 4, 0.08, 0.3);
@@ -1086,6 +1093,7 @@ function openAdmin() {
   adminMsg.textContent = '';
   padView.style.display = me.isAdmin ? 'none' : 'block';
   cheatView.style.display = me.isAdmin ? 'block' : 'none';
+  renderAdminModeBtn();
   adminEl.style.display = 'flex';
   document.exitPointerLock?.();
   tone(660, 0.08, 'square', 0.06);
@@ -1103,12 +1111,16 @@ function padPress(k) {
   tone(500 + Number(k || 0) * 40, 0.05, 'square', 0.05);
 }
 adminEl.querySelectorAll('[data-k]').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); padPress(b.dataset.k); }));
-adminEl.querySelectorAll('[data-cheat]').forEach(b => b.addEventListener('click', (e) => {
+const adminModeBtn = $('adminModeBtn');
+function renderAdminModeBtn() {
+  adminModeBtn.firstChild.textContent = `🛠️ Admin Mode: ${me.adminMode ? 'ON' : 'OFF'}`;
+  adminModeBtn.style.background = me.adminMode ? '#1f7a2e' : '#3a3f4f';
+}
+adminModeBtn.addEventListener('click', (e) => {
   e.stopPropagation();
-  send({ t: 'cheat', action: b.dataset.cheat });
+  send({ t: 'adminMode', on: !me.adminMode });
   tone(880, 0.12, 'triangle', 0.08);
-  closeAdmin();
-}));
+});
 $('adminClose').addEventListener('click', (e) => { e.stopPropagation(); closeAdmin(); });
 addEventListener('keydown', (e) => {
   if (!adminOpen) return;
@@ -1182,6 +1194,7 @@ renderer.domElement.addEventListener('click', () => {
   if (touch.active || adminOpen) return;
   if (started && !locked) { renderer.domElement.requestPointerLock?.(); return; }
   if (!locked) return;
+  if (takeFromWall(frameAt())) return;   // admin mode: clicking a weapon on the wall gives it to you
   if (canPickup()) pickup();
   else if (nearAdminPanel()) openAdmin();
   else attack();
@@ -1240,6 +1253,7 @@ document.addEventListener('touchstart', (e) => {
     } else if (touch.lookId === null) {
       touch.lookId = t.identifier;
       touch.lastX = t.clientX; touch.lastY = t.clientY;
+      touch.tapStart = { x: t.clientX, y: t.clientY, at: performance.now() };
     }
   }
   e.preventDefault();
@@ -1261,7 +1275,15 @@ document.addEventListener('touchmove', (e) => {
 function endTouches(e) {
   for (const t of e.changedTouches) {
     if (t.identifier === touch.stickId) { touch.stickId = null; setStick(0, 0); }
-    if (t.identifier === touch.lookId) touch.lookId = null;
+    if (t.identifier === touch.lookId) {
+      touch.lookId = null;
+      // a quick tap (not a swipe) on a weapon frame takes it in admin mode
+      const st = touch.tapStart;
+      if (st && me.adminMode && performance.now() - st.at < 300 && Math.hypot(t.clientX - st.x, t.clientY - st.y) < 12) {
+        takeFromWall(frameAt((t.clientX / innerWidth) * 2 - 1, -(t.clientY / innerHeight) * 2 + 1));
+      }
+      touch.tapStart = null;
+    }
     const id = btnTouch.get(t.identifier);
     if (id) {
       btnTouch.delete(t.identifier);
@@ -1295,6 +1317,21 @@ function canPickup() {
 function pickup() {
   const w = nearestWeapon();
   if (w) send({ t: 'pickup', id: w.id });
+}
+// Admin mode: which weapon frame is under the crosshair (or under a tap on touch screens)?
+const frameRay = new THREE.Raycaster();
+function frameAt(ndcX = 0, ndcY = 0) {
+  if (!me.adminMode) return null;
+  frameRay.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+  frameRay.far = 60;
+  const hit = frameRay.intersectObjects(showcase.map(sc => sc.back), false)[0];
+  return hit ? hit.object.userData.weaponType : null;
+}
+function takeFromWall(type) {
+  if (!type) return false;
+  send({ t: 'giveWeapon', type });
+  tone(1047, 0.1, 'triangle', 0.08);
+  return true;
 }
 function nearAdminPanel() {
   return Math.hypot(me.pos.x - ADMIN_PANEL.x, me.pos.z - ADMIN_PANEL.z) <= ADMIN_PANEL.reach;
@@ -1496,7 +1533,13 @@ function updateWeapons(dt, t) {
     animateWeaponMesh(fw.mesh, t);
   }
   for (const a of avatars.values()) if (a.body.held) animateWeaponMesh(a.body.held, t);
-  for (const sc of showcase) { sc.holder.rotation.y = Math.sin(t * 0.6) * 0.6; animateWeaponMesh(sc.mesh, t); }
+  const aimed = !touch.active ? frameAt() : null;
+  for (const sc of showcase) {
+    sc.holder.rotation.y = Math.sin(t * 0.6) * 0.6;
+    animateWeaponMesh(sc.mesh, t);
+    const hot = me.adminMode && (aimed === sc.id || touch.active);
+    sc.back.material.emissive.setHex(hot ? (aimed === sc.id ? 0x2a4a2a : 0x101a10) : 0x000000);
+  }
 
   // pickup prompt
   if (near && isFighter() && (!me.weapon || WEAPONS[near.type].instant) && snap.phase === 'fight' && me.hp > 0) {
@@ -1604,6 +1647,7 @@ function updateHud() {
   if (snap.wallsLeft > 0) status += ` · 🧱 Maze: ${Math.ceil(snap.wallsLeft / 1000)}s`;
   if (snap.lava) status += snap.lava.age < LAVA.warnMs ? ' · 🌋 LAVA INCOMING!' : ` · 🌋 Lava: ${Math.ceil((LAVA.warnMs + LAVA.ms - snap.lava.age) / 1000)}s`;
   if ((snap.robots || []).length) status += ` · 🤖 ${snap.robots.length} robots`;
+  if (me.adminMode) status = `🛠️ ADMIN MODE — ${touch.active ? 'tap' : 'aim at and click'} any weapon on the weapon wall · ` + status;
   if (me.cloak > 0) status = `👻 INVISIBLE ${Math.ceil(me.cloak / 1000)}s · ` + status;
   if (me.inv > 0) status = `🌈 INVINCIBLE ${Math.ceil(me.inv / 1000)}s — run into your enemy! · ` + status;
   else if (snap.phase === 'over') status = 'Match over — back to the lobby soon';

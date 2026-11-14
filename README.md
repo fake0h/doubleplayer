@@ -21,11 +21,9 @@ The north wall (around the admin panel) shows every weapon in the game in its ow
 
 ## Admin panel
 
-A glowing **ADMIN** panel hangs on the north wall. Walk up to it and press **E**, **left click**, or on a touchscreen tap **GRAB** (it glows when you're close enough) to open the number pad. The keypad has big buttons that work with touch, mouse, or your keyboard's number keys. The right code (**812**) unlocks the cheat menu. The server checks the code, and you have to be standing at the panel to enter it:
+A glowing **ADMIN** panel hangs on the north wall. Walk up to it and press **E**, **left click**, or on a touchscreen tap **GRAB** (it glows when you're close enough) to open the number pad. The keypad has big buttons that work with touch, mouse, or your keyboard's number keys. The right code (**812**) unlocks it. The server checks the code, and you have to be standing at the panel to enter it:
 
-- **Summon fake0h Spear**: puts a fake0h Fire Spear in your hand.
-- **Drop Bombs**: 100 bombs fall from the ceiling. They hit everyone, you too!
-- **Invincible**: for 30 seconds you get a rainbow skin, take no damage, and hurt anyone you run into (10 damage every half second).
+- **Admin Mode** (on/off switch): while it's on, aim at any weapon on the weapon wall and click it (or tap it on a touchscreen) to take that weapon. Instant specials like the Bomb or Lava Bucket go off right away.
 
 To change the code without editing the code, set the `ADMIN_CODE` environment variable on Render.
 
