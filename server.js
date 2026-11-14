@@ -8,10 +8,12 @@ import { WebSocketServer } from 'ws';
 import {
   WEAPONS, USES_PER_WEAPON, MAX_HEALTH, ARENA, FALL_MS, randomWeaponType, HIT_TUNING,
   randomSpecialType, usesOf, wallBox, wallHeightAt, segmentHitsWalls, jumpPadPos, BOMBS,
+  weaponName, ADMIN_PANEL, INVINCIBLE,
 } from './shared/weapons.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
+const ADMIN_CODE = process.env.ADMIN_CODE || '812';
 
 // ---------- static files ----------
 const MIME = {
@@ -134,6 +136,10 @@ function makePlayer(ws) {
     lastAttack: 0,
     lastHitAt: 0,
     lockUntil: 0,      // berserk lunge: server owns position until this time
+    admin: false,      // unlocked the admin panel
+    adminTries: 0,
+    invincibleUntil: 0,
+    lastRam: 0,
   };
 }
 
@@ -189,7 +195,7 @@ function resetToLobby() {
   game.fighters = [];
   game.winner = null;
   weapons.clear();
-  for (const pl of players.values()) { pl.hp = MAX_HEALTH; pl.weapon = null; }
+  for (const pl of players.values()) { pl.hp = MAX_HEALTH; pl.weapon = null; pl.invincibleUntil = 0; }
 }
 
 function startFight() {
@@ -274,10 +280,14 @@ function angleBetween(a, b) {
 
 function damage(target, amount, attacker, weaponType) {
   if (game.phase !== 'fight' || target.hp <= 0) return;
+  if (now() < target.invincibleUntil) {  // cheat: nothing hurts you
+    broadcast({ t: 'blocked', target: target.id });
+    return;
+  }
   target.hp = Math.max(0, target.hp - amount);
   target.lastHitAt = now();
   broadcast({ t: 'hit', target: target.id, from: attacker.id, dmg: amount, weapon: weaponType, hp: target.hp });
-  if (target.hp <= 0) endFight(attacker.id, `${attacker.name} defeated ${target.name} with the ${WEAPONS[weaponType].name}`);
+  if (target.hp <= 0) endFight(attacker.id, `${attacker.name} defeated ${target.name} with the ${weaponName(weaponType)}`);
 }
 
 function handleAttack(pl, msg) {
@@ -526,6 +536,30 @@ wss.on('connection', (ws) => {
       case 'attack': handleAttack(pl, msg); break;
       case 'pickup': handlePickup(pl, msg); break;
       case 'drop': handleDrop(pl); break;
+      case 'admin': {
+        // number pad on the wall panel: you have to be standing at the panel
+        const near = Math.hypot(pl.p[0] - ADMIN_PANEL.x, pl.p[2] - ADMIN_PANEL.z) <= ADMIN_PANEL.reach + 1.5;
+        if (!near || pl.adminTries > 20) { send(ws, { t: 'admin', ok: false }); break; }
+        const ok = String(msg.code) === ADMIN_CODE;
+        if (ok) pl.admin = true; else pl.adminTries++;
+        send(ws, { t: 'admin', ok });
+        break;
+      }
+      case 'cheat': {
+        if (!pl.admin) break;
+        if (msg.action === 'spear') {
+          pl.weapon = { type: 'fire_spear', uses: usesOf('fire_spear') };
+          pl.lastAttack = 0;
+          send(ws, { t: 'picked', weapon: 'fire_spear' });
+          announce(`🛠️ ${pl.name} summoned a fake0h Fire Spear from the admin panel!`, 2500);
+        } else if (msg.action === 'bombs') {
+          bombRain(pl);
+        } else if (msg.action === 'invincible') {
+          pl.invincibleUntil = now() + INVINCIBLE.ms;
+          announce(`🌈 ${pl.name} is INVINCIBLE for 30 seconds — don't let them touch you!`, 3000);
+        }
+        break;
+      }
       case 'debugSpawn':
         if (process.env.DEBUG_SPAWN && WEAPONS[msg.type] && game.phase === 'fight') {
           spawnWeapon(msg.type);
@@ -554,10 +588,28 @@ wss.on('connection', (ws) => {
   });
 });
 
+// Invincible players hurt anyone they run into
+function tickRams(t) {
+  if (game.phase !== 'fight') return;
+  for (const id of game.fighters) {
+    const pl = players.get(id);
+    if (!pl || t >= pl.invincibleUntil || pl.hp <= 0) continue;
+    const opp = players.get(game.fighters.find(f => f !== id));
+    if (!opp || opp.hp <= 0) continue;
+    const d = Math.hypot(opp.p[0] - pl.p[0], opp.p[2] - pl.p[2]);
+    if (d <= INVINCIBLE.ramRange && Math.abs(opp.p[1] - pl.p[1]) < 2 && t - pl.lastRam >= INVINCIBLE.ramCooldownMs) {
+      pl.lastRam = t;
+      broadcast({ t: 'fx', kind: 'ram', from: pl.id, to: opp.id, weapon: 'invincible' });
+      damage(opp, INVINCIBLE.ramDamage, pl, 'invincible');
+    }
+  }
+}
+
 // 20 Hz snapshots
 setInterval(() => {
   tickGame();
   const t = now();
+  tickRams(t);
   const snap = {
     t: 'snap',
     phase: game.phase,
@@ -570,6 +622,7 @@ setInterval(() => {
     players: [...players.values()].map(pl => ({
       id: pl.id, name: pl.name, color: pl.color, p: pl.p, yaw: pl.yaw, pitch: pl.pitch,
       streak: pl.streak, muscle: Math.min(5, pl.streak),
+      inv: Math.max(0, pl.invincibleUntil - t),
       moving: pl.moving, hp: pl.hp, w: pl.weapon ? pl.weapon.type : null, uses: pl.weapon ? pl.weapon.uses : 0,
     })),
     weapons: [...weapons.values()].map(w => ({ id: w.id, type: w.type, x: w.x, z: w.z, spin: w.spin, age: t - w.spawnAt })),

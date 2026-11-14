@@ -10,6 +10,16 @@ Everyone who opens the site appears as a glowing wireframe body in a big neon ro
 - **Jump pads** (two of them) slowly roam around the outer part of the arena. Step on one and it flings you about 29m into the air, out over the arena. You get only a little steering on the way down.
 - **Jumping** is high: about 4.4m, enough to see over the action, but not over a raised wall.
 
+## Admin panel
+
+A glowing **ADMIN** panel hangs on the north wall. Walk up to it and press **E**, **left click**, or tap **GRAB** to open the number pad. The right code (**812**) unlocks the cheat menu. The server checks the code, and you have to be standing at the panel to enter it:
+
+- **Summon fake0h Spear**: puts a fake0h Fire Spear in your hand.
+- **Drop Bombs**: 100 bombs fall from the ceiling (you're immune).
+- **Invincible**: for 30 seconds you get a rainbow skin, take no damage, and hurt anyone you run into (10 damage every half second).
+
+To change the code without editing the code, set the `ADMIN_CODE` environment variable on Render.
+
 ## Rules
 
 - Each player starts with **100 health**.
@@ -75,9 +85,9 @@ Silly weapons drop often and deadly ones are rare. To change damage, range, cool
 | Mouse | Look / aim |
 | Shift | Sprint |
 | Space | Jump |
-| E / Right click | Pick up weapon (right click also jumps) |
 | Hold right mouse | Run forward |
-| Left click | Attack |
+| Left click | Pick up a weapon when you're next to one, otherwise attack |
+| E | Pick up weapon / use the admin panel |
 | Q | Drop weapon |
 | Esc | Release mouse |
 

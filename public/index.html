@@ -101,6 +101,23 @@
   .keys.tch { display: none; }
   body.touch .keys.tch { display: grid; }
   @media (max-width: 900px) { #start h1 { font-size: 44px; } .fbar { width: 180px; } #fighters { gap: 12px; } }
+  /* ---------- admin keypad ---------- */
+  #admin { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; z-index: 20;
+    background: rgba(0,0,0,0.6); }
+  #admin .box { background: #0a0f1e; border: 3px solid #ffd23c; border-radius: 14px; padding: 18px 22px; width: 320px;
+    box-shadow: 0 0 40px rgba(255,210,60,0.4); text-align: center; position: relative; }
+  #admin h2 { margin: 0 0 10px; color: #ffd23c; letter-spacing: 0.15em; }
+  #adminCode { background: #05080f; color: #39ff14; font: bold 32px monospace; padding: 10px; border-radius: 6px; margin-bottom: 12px; letter-spacing: 0.3em; }
+  #adminMsg { color: #ff4040; font-weight: 800; min-height: 22px; margin-top: 8px; }
+  .keypad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .keypad button, .cheat { font: 800 24px system-ui, sans-serif; padding: 16px 0; border-radius: 10px; border: 0; cursor: pointer;
+    background: #1c2540; color: #fff; touch-action: manipulation; }
+  .keypad button:active, .cheat:active { transform: scale(0.95); }
+  .keypad button[data-k="OK"] { background: #1f7a2e; }
+  .keypad button[data-k="C"] { background: #7a1f1f; }
+  .cheat { display: block; width: 100%; margin: 10px 0; font-size: 18px; padding: 16px 10px; text-align: left; }
+  .cheat small { display: block; font-weight: 500; font-size: 13px; opacity: 0.8; margin-top: 3px; }
+  #adminClose { position: absolute; top: 8px; right: 10px; background: none; border: 0; color: #fff; font-size: 26px; cursor: pointer; }
   #conn { position: fixed; bottom: 8px; left: 50%; transform: translateX(-50%); font-size: 12px; opacity: 0.6; }
 </style>
 <script type="importmap">
@@ -141,9 +158,9 @@
     <b>Mouse</b><span>Look / aim</span>
     <b>Shift</b><span>Sprint</span>
     <b>Space</b><span>Jump</span>
-    <b>E / Right click</b><span>Pick up weapon (right click also jumps)</span>
     <b>Hold right mouse</b><span>Run forward</span>
-    <b>Left click</b><span>Attack</span>
+    <b>Left click</b><span>Pick up weapon (when next to one) / attack</span>
+    <b>E</b><span>Pick up weapon / use admin panel</span>
     <b>Q</b><span>Drop weapon</span>
     <b>Esc</b><span>Release mouse</span>
   </div>
@@ -161,6 +178,28 @@
   <div id="btnGrab" class="tbtn">GRAB</div>
   <div id="btnJump" class="tbtn">JUMP</div>
   <div id="btnDrop" class="tbtn">DROP</div>
+</div>
+<div id="admin">
+  <div class="box">
+    <button id="adminClose" aria-label="Close">×</button>
+    <h2>ADMIN PANEL</h2>
+    <div id="padView">
+      <div id="adminCode">_ _ _</div>
+      <div class="keypad">
+        <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
+        <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
+        <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
+        <button data-k="C">C</button><button data-k="0">0</button><button data-k="OK">OK</button>
+      </div>
+      <div id="adminMsg"></div>
+    </div>
+    <div id="cheatView" style="display:none">
+      <div style="color:#39ff14;font-weight:800;margin-bottom:6px">ACCESS GRANTED — CHEAT MENU</div>
+      <button class="cheat" data-cheat="spear" style="background:#7a3300">🔥 Summon fake0h Spear<small>Puts a fake0h Fire Spear in your hand</small></button>
+      <button class="cheat" data-cheat="bombs" style="background:#5a1010">💣 Drop Bombs<small>100 bombs fall from the ceiling (you're immune)</small></button>
+      <button class="cheat" data-cheat="invincible" style="background:linear-gradient(90deg,#d00,#d80,#cc0,#0a0,#06c,#80c)">🌈 Invincible<small>30s: rainbow skin, no damage, ram enemies to hurt them</small></button>
+    </div>
+  </div>
 </div>
 <div id="conn"></div>
 

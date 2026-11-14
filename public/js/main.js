@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { WEAPONS, ARENA, FALL_MS, USES_PER_WEAPON, MAX_HEALTH, usesOf, wallBox, wallHeightAt } from '/shared/weapons.js';
+import { WEAPONS, ARENA, FALL_MS, USES_PER_WEAPON, MAX_HEALTH, usesOf, wallBox, wallHeightAt, weaponName, ADMIN_PANEL } from '/shared/weapons.js';
 import { WireBody } from './body.js';
 import { buildWeaponMesh, animateWeaponMesh } from './weaponMeshes.js';
 
@@ -179,6 +179,43 @@ function updateJumpPads(dt, t) {
   }
 }
 
+// ---------- admin panel (north wall) ----------
+const adminPanel = (() => {
+  const g = new THREE.Group();
+  g.position.set(ADMIN_PANEL.x, 0, -HALF + 0.05);
+  const c = document.createElement('canvas');
+  c.width = 256; c.height = 384;
+  const x = c.getContext('2d');
+  x.fillStyle = '#0a0f1e'; x.fillRect(0, 0, 256, 384);
+  x.strokeStyle = '#ffd23c'; x.lineWidth = 8; x.strokeRect(6, 6, 244, 372);
+  x.fillStyle = '#ffd23c'; x.font = 'bold 40px sans-serif'; x.textAlign = 'center'; x.fillText('ADMIN', 128, 56);
+  x.fillStyle = '#05080f'; x.fillRect(30, 76, 196, 46);
+  x.fillStyle = '#39ff14'; x.font = 'bold 30px monospace'; x.fillText('* * *', 128, 110);
+  const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', 'C', '0', 'OK'];
+  keys.forEach((k, i) => {
+    const cx = 52 + (i % 3) * 76, cy = 150 + Math.floor(i / 3) * 56;
+    x.fillStyle = k === 'OK' ? '#1f7a2e' : k === 'C' ? '#7a1f1f' : '#1c2540';
+    x.fillRect(cx - 30, cy, 60, 44);
+    x.fillStyle = '#fff'; x.font = 'bold 24px sans-serif'; x.fillText(k, cx, cy + 31);
+  });
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 2.4), new THREE.MeshBasicMaterial({ map: tex }));
+  face.position.y = 1.8;
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(1.8, 2.6, 0.12), new THREE.MeshStandardMaterial({ color: 0x333a4a, metalness: 0.8, roughness: 0.3 }));
+  frame.position.set(0, 1.8, -0.07);
+  const light = new THREE.PointLight(0xffd23c, 4, 6);
+  light.position.set(0, 2, 1);
+  const floorMark = new THREE.Mesh(new THREE.RingGeometry(ADMIN_PANEL.reach - 0.15, ADMIN_PANEL.reach, 48, 1, 0, Math.PI),
+    new THREE.MeshBasicMaterial({ color: 0xffd23c, transparent: true, opacity: 0.25, side: THREE.DoubleSide }));
+  floorMark.rotation.x = -Math.PI / 2;
+  floorMark.rotation.z = Math.PI;
+  floorMark.position.y = 0.03;
+  g.add(frame, face, light, floorMark);
+  scene.add(g);
+  return { light, floorMark };
+})();
+
 // ---------- pressure pads ----------
 const pads = ARENA.pads.map((p, i) => {
   const g = new THREE.Group();
@@ -319,8 +356,9 @@ function applySnapshot(s) {
     const a = getAvatar(p);
     a.data = p;
     a.body.setMuscle(p.muscle || 0);
+    a.body.rainbow = (p.inv || 0) > 0;
     if (p.id !== me.id) { a.target.set(...p.p); a.yaw = p.yaw; }
-    else { me.hp = p.hp; me.weapon = p.w; me.uses = p.uses; me.streak = p.streak || 0; me.muscle = p.muscle || 0; }
+    else { me.hp = p.hp; me.weapon = p.w; me.uses = p.uses; me.streak = p.streak || 0; me.muscle = p.muscle || 0; me.inv = p.inv || 0; }
     if (a.weaponType !== p.w) {
       a.weaponType = p.w;
       a.body.setWeapon(p.w ? buildWeaponMesh(p.w) : null, p.w ? WEAPONS[p.w].kind : null);
@@ -559,10 +597,22 @@ function connect() {
         if (m.kind === 'homing') onHomingFx(m);
         else if (m.kind === 'berserk') onBerserkFx(m);
         else if (m.kind === 'punch') onPunchFx(m);
+        else if (m.kind === 'ram') {
+          const tgt = avatars.get(m.to);
+          if (tgt) addBurst(tgt.body.root.position.clone().add(new THREE.Vector3(0, 1.1, 0)), new THREE.Color().setHSL(Math.random(), 1, 0.6).getHex(), 14, 6, 0.1, 0.5);
+          tone(300 + Math.random() * 400, 0.08, 'square', 0.08, 200);
+        }
         else onAttackFx(m);
         break;
       case 'heal': onHeal(m); break;
       case 'bombs': onBombs(m); break;
+      case 'admin': onAdminResult(m); break;
+      case 'blocked': {
+        const a = avatars.get(m.target);
+        if (a) addBurst(a.body.root.position.clone().add(new THREE.Vector3(0, 1.2, 0)), 0xffffff, 8, 4, 0.08, 0.3);
+        tone(1500, 0.05, 'triangle', 0.05);
+        break;
+      }
       case 'teleport':
         // berserk launch: fly to the enemy, controls locked during the flurry
         me.dash = { from: me.pos.clone(), to: new THREE.Vector3(...m.p), start: performance.now(), ms: m.launchMs };
@@ -814,10 +864,65 @@ function updateBombs(t) {
   }
 }
 
+// ---------- admin keypad + cheat menu ----------
+let adminOpen = false;
+let adminCode = '';
+const adminEl = $('admin'), padView = $('padView'), cheatView = $('cheatView'), codeEl = $('adminCode'), adminMsg = $('adminMsg');
+function openAdmin() {
+  adminOpen = true;
+  adminCode = '';
+  codeEl.textContent = '_ _ _';
+  adminMsg.textContent = '';
+  padView.style.display = me.isAdmin ? 'none' : 'block';
+  cheatView.style.display = me.isAdmin ? 'block' : 'none';
+  adminEl.style.display = 'flex';
+  document.exitPointerLock?.();
+  tone(660, 0.08, 'square', 0.06);
+}
+function closeAdmin() {
+  adminOpen = false;
+  adminEl.style.display = 'none';
+  if (!touch.active) renderer.domElement.requestPointerLock?.();
+}
+function padPress(k) {
+  if (k === 'C') adminCode = '';
+  else if (k === 'OK') { send({ t: 'admin', code: adminCode }); adminMsg.textContent = 'Checking…'; return; }
+  else if (adminCode.length < 6) adminCode += k;
+  codeEl.textContent = adminCode ? '*'.repeat(adminCode.length) : '_ _ _';
+  tone(500 + Number(k || 0) * 40, 0.05, 'square', 0.05);
+}
+adminEl.querySelectorAll('[data-k]').forEach(b => b.addEventListener('click', (e) => { e.stopPropagation(); padPress(b.dataset.k); }));
+adminEl.querySelectorAll('[data-cheat]').forEach(b => b.addEventListener('click', (e) => {
+  e.stopPropagation();
+  send({ t: 'cheat', action: b.dataset.cheat });
+  tone(880, 0.12, 'triangle', 0.08);
+  closeAdmin();
+}));
+$('adminClose').addEventListener('click', (e) => { e.stopPropagation(); closeAdmin(); });
+addEventListener('keydown', (e) => {
+  if (!adminOpen) return;
+  if (/^Digit[0-9]$/.test(e.code) || /^Numpad[0-9]$/.test(e.code)) padPress(e.code.slice(-1));
+  else if (e.code === 'Enter' || e.code === 'NumpadEnter') padPress('OK');
+  else if (e.code === 'Backspace') padPress('C');
+  else if (e.code === 'Escape') closeAdmin();
+});
+function onAdminResult(m) {
+  if (m.ok) {
+    me.isAdmin = true;
+    padView.style.display = 'none';
+    cheatView.style.display = 'block';
+    [523, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.12, 'triangle', 0.08), i * 90));
+  } else {
+    adminMsg.textContent = 'ACCESS DENIED';
+    adminCode = ''; codeEl.textContent = '_ _ _';
+    tone(120, 0.3, 'sawtooth', 0.1);
+  }
+}
+
 let hitMarkerT = 0;
 function onHit(m) {
   const target = avatars.get(m.target);
-  const def = WEAPONS[m.weapon];
+  const def = WEAPONS[m.weapon] || { name: weaponName(m.weapon) };
   if (target) {
     target.body.flash();
     const p = target.body.root.position.clone().add(new THREE.Vector3(0, 1.9, 0));
@@ -851,7 +956,7 @@ function begin() {
   started = true;
   if (!touch.active) renderer.domElement.requestPointerLock?.();
 }
-// Right mouse: click = pick up + jump, hold = run forward
+// Mouse: hold right = run forward; left click = pick up (when next to a weapon) or attack
 let rightHeld = false;
 let jumpReq = false;
 renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -859,15 +964,16 @@ renderer.domElement.addEventListener('mousedown', (e) => {
   if (e.button !== 2 || touch.active || !started) return;
   e.preventDefault();
   rightHeld = true;
-  pickup();
-  jumpReq = true;
 });
 addEventListener('mouseup', (e) => { if (e.button === 2) rightHeld = false; });
 addEventListener('blur', () => { rightHeld = false; });
 renderer.domElement.addEventListener('click', () => {
-  if (touch.active) return;
-  if (started && !locked) renderer.domElement.requestPointerLock?.();
-  else if (locked) attack();
+  if (touch.active || adminOpen) return;
+  if (started && !locked) { renderer.domElement.requestPointerLock?.(); return; }
+  if (!locked) return;
+  if (canPickup()) pickup();
+  else if (nearAdminPanel()) openAdmin();
+  else attack();
 });
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === renderer.domElement;
@@ -880,7 +986,8 @@ document.addEventListener('mousemove', (e) => {
 addEventListener('keydown', (e) => {
   keys[e.code] = true;
   if (!started) return;
-  if (e.code === 'KeyE') pickup();
+  if (adminOpen) return; // keypad handles its own keys
+  if (e.code === 'KeyE') { if (canPickup() || !nearAdminPanel()) pickup(); else openAdmin(); }
   if (e.code === 'KeyQ') send({ t: 'drop' });
   if (e.code === 'Space') e.preventDefault();
 });
@@ -902,7 +1009,7 @@ function setStick(dx, dy) {
 
 document.addEventListener('touchstart', (e) => {
   enableTouch();
-  if (!started) return; // let the start screen's tap work normally
+  if (!started || adminOpen) return; // let the start screen / admin keypad taps work normally
   for (const t of e.changedTouches) {
     const el = t.target.closest ? t.target.closest('.tbtn, #stick') : null;
     if (el && el.id === 'stick') {
@@ -916,7 +1023,7 @@ document.addEventListener('touchstart', (e) => {
       el.classList.add('down');
       if (actx && actx.state === 'suspended') actx.resume();
       if (el.id === 'btnAttack') { touch.attackHeld = true; attack(); }
-      if (el.id === 'btnGrab') pickup();
+      if (el.id === 'btnGrab') { if (canPickup() || !nearAdminPanel()) pickup(); else openAdmin(); }
       if (el.id === 'btnJump') touch.jump = true;
       if (el.id === 'btnDrop') send({ t: 'drop' });
     } else if (touch.lookId === null) {
@@ -928,7 +1035,7 @@ document.addEventListener('touchstart', (e) => {
 }, { passive: false });
 
 document.addEventListener('touchmove', (e) => {
-  if (!started) return;
+  if (!started || adminOpen) return;
   for (const t of e.changedTouches) {
     if (t.identifier === touch.stickId) setStick(t.clientX - touch.stickCx, t.clientY - touch.stickCy);
     else if (t.identifier === touch.lookId) {
@@ -970,9 +1077,16 @@ function nearestWeapon() {
   }
   return best;
 }
+function canPickup() {
+  const w = nearestWeapon();
+  return !!w && isFighter() && snap.phase === 'fight' && me.hp > 0 && (!me.weapon || WEAPONS[w.type].instant);
+}
 function pickup() {
   const w = nearestWeapon();
   if (w) send({ t: 'pickup', id: w.id });
+}
+function nearAdminPanel() {
+  return Math.hypot(me.pos.x - ADMIN_PANEL.x, me.pos.z - ADMIN_PANEL.z) <= ADMIN_PANEL.reach;
 }
 
 const raycaster = new THREE.Raycaster();
@@ -1170,7 +1284,11 @@ function updateWeapons(dt, t) {
   // pickup prompt
   if (near && isFighter() && (!me.weapon || WEAPONS[near.type].instant) && snap.phase === 'fight' && me.hp > 0) {
     const d = WEAPONS[near.type];
-    ui.prompt.innerHTML = `${touch.active ? 'Tap <b>GRAB</b>' : 'Press <b>E</b>'} to pick up <b style="color:${hex(d.color)}">${d.special ? '★ ' : ''}${d.name}</b> · ${d.special ? d.desc : d.damage + ' dmg'}`;
+    ui.prompt.innerHTML = `${touch.active ? 'Tap <b>GRAB</b>' : '<b>Left click</b> or <b>E</b>'} to pick up <b style="color:${hex(d.color)}">${d.special ? '★ ' : ''}${d.name}</b> · ${d.special ? d.desc : d.damage + ' dmg'}`;
+    ui.prompt.style.display = 'block';
+    buttons.btnGrab.classList.add('ready');
+  } else if (nearAdminPanel() && !adminOpen) {
+    ui.prompt.innerHTML = `${touch.active ? 'Tap <b>GRAB</b>' : 'Press <b>E</b> or <b>left click</b>'} to use the <b style="color:#ffd23c">ADMIN PANEL</b>`;
     ui.prompt.style.display = 'block';
     buttons.btnGrab.classList.add('ready');
   } else { ui.prompt.style.display = 'none'; buttons.btnGrab.classList.remove('ready'); }
@@ -1237,7 +1355,7 @@ function updateHud() {
   } else {
     ui.wName.textContent = 'Bare hands';
     ui.wName.style.color = '#e8f6ff';
-    ui.wInfo.textContent = snap.phase === 'fight' && isFighter() ? (touch.active ? 'Walk to a weapon and tap GRAB' : 'Grab a weapon from the floor (E)') : 'Weapons drop when the fight starts';
+    ui.wInfo.textContent = snap.phase === 'fight' && isFighter() ? (touch.active ? 'Walk to a weapon and tap GRAB' : 'Walk to a weapon and left click (or E)') : 'Weapons drop when the fight starts';
   }
   ui.pips.innerHTML = Array.from({ length: me.weapon ? usesOf(me.weapon) : USES_PER_WEAPON }, (_, i) => `<div class="pip ${i < me.uses ? 'on' : ''}"></div>`).join('');
 
@@ -1251,6 +1369,7 @@ function updateHud() {
   } else if (snap.phase === 'countdown') status = 'Get ready!';
   else if (snap.phase === 'fight') status = isFighter() ? 'Fight! Pick up weapons and attack' : 'Spectating the match';
   if (snap.wallsLeft > 0) status += ` · 🧱 Maze: ${Math.ceil(snap.wallsLeft / 1000)}s`;
+  if (me.inv > 0) status = `🌈 INVINCIBLE ${Math.ceil(me.inv / 1000)}s — run into your enemy! · ` + status;
   else if (snap.phase === 'over') status = 'Match over — back to the lobby soon';
   ui.status.textContent = status;
 
@@ -1300,6 +1419,8 @@ function frame() {
   updatePads(dt, clock.t);
   updateWalls(clock.t);
   updateJumpPads(dt, clock.t);
+  adminPanel.light.intensity = 3 + Math.sin(clock.t * 3) * 1.5;
+  adminPanel.floorMark.material.opacity = nearAdminPanel() ? 0.6 : 0.25;
   updateFx(dt);
   updateHoming();
   updateBombs(clock.t);

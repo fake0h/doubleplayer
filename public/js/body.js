@@ -230,6 +230,19 @@ export class WireBody {
 
   update(dt, moving, pitch = 0, downed = false) {
     this.updateMuscleAndGlow(dt);
+    // invincibility cheat: cycling rainbow skin
+    if (this.rainbow) {
+      const h = (performance.now() / 600) % 1;
+      this.mat.color.setHSL(h, 1, 0.6);
+      this.fillMat.color.setHSL((h + 0.5) % 1, 1, 0.55);
+      this.fillMat.opacity = 0.35;
+      this.wasRainbow = true;
+    } else if (this.wasRainbow) {
+      this.wasRainbow = false;
+      this.mat.color.copy(this.color);
+      this.fillMat.color.copy(this.color);
+      this.fillMat.opacity = 0.08;
+    }
     const speed = moving ? 9 : 0;
     this.walkPhase += dt * speed;
     const s = Math.sin(this.walkPhase) * (moving ? 0.7 : 0);

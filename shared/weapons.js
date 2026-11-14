@@ -99,6 +99,13 @@ export function randomSpecialType(rng = Math.random) {
   return SPECIAL_IDS[0];
 }
 
+// Names for damage sources that aren't weapons
+export const weaponName = (type) => WEAPONS[type]?.name ?? ({ invincible: 'Rainbow Ram' })[type] ?? type;
+
+// Admin panel on the north wall (code is checked on the server)
+export const ADMIN_PANEL = { x: 0, z: -29.5, reach: 4 };
+export const INVINCIBLE = { ms: 30000, ramDamage: 10, ramRange: 1.3, ramCooldownMs: 500 };
+
 // Bomb rain settings
 export const BOMBS = { count: 100, spreadMs: 2500, fuseMs: 3000 };
 
