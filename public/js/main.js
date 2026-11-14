@@ -1341,7 +1341,7 @@ function updateCheese(dt, t) {
     return;
   }
   smiley.update(dt, t);
-  cheeseEl.hud.style.display = 'block';
+  cheeseEl.hud.style.display = resultsEl.style.display === 'block' ? 'none' : 'block';   // results take over the screen
   const playing = inCheeseGame();
   // live scoring during the 10-second pose window
   const local = isLocalHost();
