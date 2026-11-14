@@ -6,7 +6,7 @@ Everyone who opens the site appears as a glowing wireframe body in a big neon ro
 
 - **4xPVP** (northwest corner, neon-green pads, big 4xPVP sign facing the Say Cheese sign across the room): the weapons free-for-all described below.
 - **Say Cheese** (northeast corner, yellow pads, big smiley face): a face-making game played with your camera. See below.
-- **Next game** (middle of the east wall, blue pads, next to the Say Cheese smiley): coming soon.
+- **Dance Dance Disco** (middle of the east wall, blue pads, next to the Say Cheese smiley): dance together for your cameras until the dance floor explodes. See below.
 - **Gray pads** (southeast corner, and across the room on the west wall in the middle and the southwest corner): not used yet.
 
 **Alone on a pad?** A panel pops up with **📣 Invite everyone** (key **I**): every other player in the arena gets a popup with a **Join** button (key **J**) that drops them onto a free pad. **🔗 Copy link** (key **L**) copies the game's address to send to friends who aren't on the site yet. On the Say Cheese pads there's also **▶ Play now** (key **P**) to start a game with everyone in front of your camera.
@@ -44,6 +44,18 @@ Face reading uses Google's MediaPipe face tracker, which runs inside each player
 To try Say Cheese without a camera (for testing), open the site with `?fakeface=1` on the end of the address. It uses simulated face scores.
 
 The emotions and what the camera looks for are in `shared/emotions.js`.
+
+## Dance Dance Disco
+
+Start it like Say Cheese: 2-4 players on the blue pads (each with their own camera), or one player presses **Play now** for 2-4 dancers in front of one camera.
+
+1. The dancers line up in the middle of the room, facing the camera, under a spinning disco ball and sweeping colored spotlights.
+2. **Just dance!** Each camera measures how much its dancer is moving. In a same-camera game, the picture is split around each dancer's face. Everyone's avatar dances along, harder the more they move, and a score bar under each dancer shows their live energy and their score.
+3. The disco music (made live in the browser) gets louder and adds layers as everyone dances harder.
+4. The **party meter** only fills while **everyone** is dancing at max, and drains when anyone slacks. As it fills, the room pulses with the beat, the dancers start glowing, and the music swells.
+5. When the meter is full: **BOOM!** The dance floor explodes, everyone is blown into the air, and **everybody wins**. A results chart shows each dancer's score.
+
+If the floor hasn't exploded after 2½ minutes, the music stops and the game ends. Settings are in `shared/disco.js`. Add `?fakeface=1` to the address to try it with simulated dancers.
 
 ## Weapon wall
 

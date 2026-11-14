@@ -4,6 +4,8 @@ import { WireBody } from './body.js';
 import { buildWeaponMesh, animateWeaponMesh, buildRobot } from './weaponMeshes.js';
 import { Smiley } from './smiley.js';
 import { FaceScorer } from './cheese.js';
+import { MotionMeter, DiscoMusic } from './dance.js';
+import { DISCO } from '/shared/disco.js';
 import { emotionById, CHEESE, CHEESE_SPOTS } from '/shared/emotions.js';
 
 // ---------- renderer / scene ----------
@@ -165,7 +167,7 @@ const jumpPadMeshes = ARENA.jumpPads.map((jp) => {
   return { g, top, chevrons, light, flash: 0 };
 });
 function updateJumpPads(dt, t) {
-  const hide = snap.mode === 'cheese' && (snap.phase === 'cheese' || snap.phase === 'over');
+  const hide = (snap.mode === 'cheese' || snap.mode === 'disco') && (snap.phase === 'cheese' || snap.phase === 'disco' || snap.phase === 'over');
   for (const jp of jumpPadMeshes) jp.g.visible = !hide;
   if (snap.jumpPads) snap.jumpPads.forEach(([x, z], i) => {
     const jp = jumpPadMeshes[i];
@@ -405,6 +407,38 @@ photoFrame.add(photoBorder, photo);
 scene.add(photoFrame);
 const photoCaption = textPlane(11.8, 1.6, new THREE.Vector3(7, 4.2, HALF - 0.1));
 
+// ---------- Dance Dance Disco scenery (only shown during the game) ----------
+const disco = (() => {
+  const g = new THREE.Group();
+  g.visible = false;
+  const ball = new THREE.Mesh(new THREE.IcosahedronGeometry(1.4, 2),
+    new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 1, roughness: 0.15, flatShading: true, emissive: 0x222233 }));
+  ball.position.set(0, 8.5, 0);   // low enough to be in the dancers' camera view
+  const string = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, H - 9.9, 4), new THREE.MeshBasicMaterial({ color: 0x888888 }));
+  string.position.set(0, 8.5 + (H - 8.5) / 2, 0);
+  g.add(ball, string);
+  const cols = [0xff3df2, 0x00e5ff, 0xffd400, 0x7dff3d];
+  const spots = cols.map((c, i) => {
+    const sl = new THREE.SpotLight(c, 0, 40, 0.35, 0.5);
+    sl.position.set(0, 8.3, 0);
+    sl.target.position.set(Math.cos(i * Math.PI / 2) * 8, 0, Math.sin(i * Math.PI / 2) * 8);
+    g.add(sl, sl.target);
+    const beam = new THREE.Mesh(new THREE.ConeGeometry(2.5, 9, 24, 1, true),
+      new THREE.MeshBasicMaterial({ color: c, transparent: true, opacity: 0.08, side: THREE.DoubleSide, depthWrite: false, blending: THREE.AdditiveBlending }));
+    g.add(beam);
+    return { sl, beam, c };
+  });
+  // glowing dance floor under the line of dancers
+  const floorTiles = [];
+  for (let i = -4; i <= 4; i++) for (let j = -2; j <= 2; j++) {
+    const tile = new THREE.Mesh(new THREE.PlaneGeometry(1.9, 1.9), new THREE.MeshBasicMaterial({ color: cols[(i + j + 8) % 4], transparent: true, opacity: 0.15, depthWrite: false }));
+    tile.rotation.x = -Math.PI / 2; tile.position.set(i * 2, 0.02, j * 2);
+    g.add(tile); floorTiles.push(tile);
+  }
+  scene.add(g);
+  return { g, ball, spots, floorTiles, cols };
+})();
+
 // ---------- pressure pads ----------
 const PVP_GREEN = 0x39ff14, CHEESE_YELLOW = 0xffd400;
 function makePad(p, color) {
@@ -482,6 +516,18 @@ const cheeseSign = wallSign((x, W, Hc) => {
   x.shadowColor = '#ffd400'; x.shadowBlur = 20;
   x.fillText('SAY CHEESE', cx, Hc * 0.95);
 }, 11, 9, new THREE.Vector3(HALF - 0.1, 7, -21), -Math.PI / 2);
+// Dance Dance Disco sign on the east wall above the blue pads
+const discoSign = wallSign((x, W, Hc) => {
+  x.fillStyle = 'rgba(0,6,20,0.85)'; x.fillRect(0, 0, W, Hc);
+  const g = x.createLinearGradient(0, 0, W, 0);
+  g.addColorStop(0, '#ff3df2'); g.addColorStop(0.5, '#00e5ff'); g.addColorStop(1, '#ffd400');
+  x.strokeStyle = g; x.lineWidth = 16; x.shadowColor = '#2a8cff'; x.shadowBlur = 30; x.strokeRect(20, 20, W - 40, Hc - 40);
+  x.fillStyle = g; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.font = '900 120px sans-serif'; x.fillText('🪩 DANCE DANCE', W / 2, Hc * 0.33, W - 80);
+  x.font = '900 150px sans-serif'; x.fillText('DISCO', W / 2, Hc * 0.66, W - 80);
+  x.shadowBlur = 0; x.fillStyle = '#d8ecff'; x.font = 'bold 40px sans-serif';
+  x.fillText('Dance with your camera until the floor explodes · blue pads', W / 2, Hc * 0.9, W - 80);
+}, 11, 6.2, new THREE.Vector3(HALF - 0.1, 6, 0), -Math.PI / 2);
 const cheeseFloor = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), new THREE.MeshBasicMaterial({ color: CHEESE_YELLOW, transparent: true, opacity: 0.06, depthWrite: false }));
 cheeseFloor.rotation.x = -Math.PI / 2; cheeseFloor.position.set(21, 0.015, -21); scene.add(cheeseFloor);
 
@@ -808,6 +854,7 @@ function connect() {
       case 'msg': feed(m.text); break;
       case 'countdown': {
         const names = m.fighters.map(id => avatars.get(id)?.data.name ?? '?');
+        if (m.mode === 'disco') { banner(`🪩 DANCE DANCE DISCO: ${names.join(', ')}\nOthers: hop on a free blue pad to join!`, 3000); break; }
         banner(m.mode === 'cheese' ? `🧀 SAY CHEESE: ${names.join(', ')}\nOthers: hop on a free yellow pad to join!` : `${names.join(' vs ')}\nOthers: jump on a free pad to join!`, 3000);
         break;
       }
@@ -826,6 +873,7 @@ function connect() {
         const lvl = m.muscle || 0;
         const streakLine = m.streak >= 2 ? `\n${m.streak} wins in a row!` : '';
         const muscleLine = lvl >= 5 ? ' MAX MUSCLE — GLOWING!' : lvl > 0 ? ` Muscle level ${lvl}` : '';
+        if (m.mode === 'disco') { showDiscoResults(m); banner(m.boom ? '💥 THE DANCE FLOOR EXPLODED — EVERYBODY WINS! 💥' : '🪩 The music stopped!', 5500); break; }
         if (m.mode === 'cheese') showCheeseResults(m);
         banner(m.mode === 'cheese' ? `🧀 ${m.name} WINS SAY CHEESE! 🧀` : `${m.name} WINS!\n${m.reason}${streakLine}${muscleLine ? `\n💪${muscleLine}` : ''}`, 5500);
         if (lvl > 0) feed(`${m.name} bulked up to muscle level ${lvl}${lvl >= 5 ? ' (MAX — glowing!)' : ''}`, '#ffd23c');
@@ -864,6 +912,8 @@ function connect() {
       case 'cheeseStart': onCheeseStart(m); hideInvite(); break;
       case 'invite': onInvite(m); break;
       case 'cheeseCount': onCheeseCount(m); break;
+      case 'discoGo': onDiscoGo(); break;
+      case 'discoBoom': onDiscoBoom(); break;
       case 'cheeseRound': onCheeseRound(m); break;
       case 'cheeseFlash': onCheeseFlash(m); break;
       case 'cheesePhoto': onCheesePhoto(m); break;
@@ -1252,10 +1302,18 @@ async function showCameraAsk() {
   cheeseEl.cam.style.display = 'flex';
 }
 
+let camGame = 'cheese';
 function onCheeseStart(m) {
   me.cheeseSpot = m.spot;
   localIds = null;
   winningFaces = {};
+  camGame = m.game || 'cheese';
+  const disc = camGame === 'disco';
+  document.querySelector('#cheeseCam h2').textContent = disc ? '🪩 DANCE DANCE DISCO' : '🧀 SAY CHEESE';
+  document.querySelector('#camCount p').textContent = disc ? 'How many dancers are in front of this camera?' : 'How many players are in front of this camera?';
+  document.querySelector('#camAsk p').innerHTML = disc
+    ? 'Dance for your camera! The more you move, the higher your score. When everyone dances at max, the floor explodes.<br><small>Your video stays on your device.</small>'
+    : 'The giant smiley will ask for a face. Make it with your real face! Your camera rates how well you match, and the best face each round gets its photo on the wall.<br><small>Your video stays on your device. Only the round winner\'s snapshot is shared.</small>';
   document.exitPointerLock?.();
   if (m.local) {
     // started alone: ask how many people are playing on this camera first
@@ -1338,7 +1396,7 @@ function updateCheese(dt, t) {
   if (!show) {
     photoFrame.visible = false; photoCaption.mesh.visible = false;
     cheeseEl.hud.style.display = 'none';
-    if (virtualAvatars.size) updateVirtualAvatars(dt);
+    if (virtualAvatars.size && snap.mode !== 'disco') updateVirtualAvatars(dt);
     if (snap.phase === 'lobby') {
       resultsEl.style.display = 'none';
       // keep the camera connected for the next game; just hide the preview
@@ -1410,6 +1468,7 @@ function showCheeseResults(m) {
   const medals = ['🥇', '🥈', '🥉', '4️⃣'];
   // spectators who joined mid-game may have missed some photos; they still see the bars
   if (!Object.keys(winningFaces).length && !standings.length) return;
+  document.querySelector('#cheeseResults h2').textContent = '🏆 SAY CHEESE — FINAL RESULTS 🏆';
   $('resultsSub').textContent = m.reason || '';
   $('resultsRows').innerHTML = standings.map(([id, name, wins], i) => {
     const faces = winningFaces[id] || [];
@@ -1445,16 +1504,21 @@ function drawFaceBoxes(local, posing) {
 }
 
 // Local game: avatars for players 2-4 (they don't have their own device)
+function camGamePlayers() {
+  if (snap.mode === 'disco' && snap.disco) return snap.disco.players.map(p => ({ id: p[0], energy: p[1], score: p[2], name: p[4], virtual: !!p[5] }));
+  if (snap.cheese) return snap.cheese.players.map(p => ({ id: p[0], name: p[5], virtual: !!p[6] }));
+  return [];
+}
 function updateVirtualAvatars(dt) {
-  const C = snap.cheese;
+  const spotsList = snap.mode === 'disco' ? DISCO.spots : CHEESE_SPOTS;
   const want = new Set();
-  (C?.players || []).forEach(([id, , , , , name, virtual], i) => {
+  camGamePlayers().forEach(({ id, name, virtual }, i) => {
     if (!virtual) return;
     want.add(id);
     let v = virtualAvatars.get(id);
     if (!v) {
       const body = new WireBody(VIRTUAL_COLORS[i % 4]);
-      const spot = CHEESE_SPOTS[i];
+      const spot = spotsList[i];
       body.root.position.set(spot.x, 0, spot.z);
       body.root.rotation.y = Math.PI;
       scene.add(body.root);
@@ -1465,7 +1529,9 @@ function updateVirtualAvatars(dt) {
       v = { body, label };
       virtualAvatars.set(id, v);
     }
+    applyDiscoToBody(v.body, id, i);
     v.body.update(dt, false, 0.2, false);
+    applyBlown(v.body.root, i, spotsList[i]);
     const pos = v.body.root.position.clone().add(new THREE.Vector3(0, 2.25, 0)).project(camera);
     v.label.style.display = pos.z < 1 ? 'block' : 'none';
     v.label.style.left = `${(pos.x * 0.5 + 0.5) * innerWidth}px`;
@@ -1474,6 +1540,148 @@ function updateVirtualAvatars(dt) {
   for (const [id, v] of virtualAvatars) {
     if (!want.has(id)) { scene.remove(v.body.root); v.label.remove(); virtualAvatars.delete(id); }
   }
+}
+
+// ---------- Dance Dance Disco client ----------
+const meter = new MotionMeter();
+let music = null;
+let energySent = 0, discoFacesSent = 0;
+let blownAt = 0;                       // when the dance floor exploded
+const danceTags = new Map();           // id -> label element under each dancer
+const discoEl = { hud: $('discoHud'), meter: document.querySelector('#discoMeter > div'), hint: $('discoHint'), title: $('discoTitle'), tags: $('danceTags') };
+function inDiscoGame() { return snap.mode === 'disco' && !!snap.disco && snap.disco.players.some(p => p[0] === me.id); }
+function discoIndex(id) { return snap.disco ? snap.disco.players.findIndex(p => p[0] === id) : -1; }
+function onDiscoGo() {
+  if (!actx) { try { actx = new AudioContext(); } catch {} }
+  if (actx && !music) music = new DiscoMusic(actx);
+  if (actx?.state === 'suspended') actx.resume();
+  music?.start();
+  blownAt = 0;
+  meter.fakeT = 0;
+}
+function onDiscoBoom() {
+  blownAt = performance.now();
+  music?.boom();
+  cheeseEl.flash.style.transition = 'none'; cheeseEl.flash.style.opacity = 1;
+  requestAnimationFrame(() => { cheeseEl.flash.style.transition = 'opacity 1.5s ease-out'; cheeseEl.flash.style.opacity = 0; });
+  shake = 1.2;
+  const center = new THREE.Vector3(0, 1.5, 0);
+  const ring = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 }));
+  ring.position.copy(center); scene.add(ring);
+  fx.push({ obj: ring, life: 1.2, max: 1.2, fade: true, grow: 4 });
+  for (const c of [0xff3df2, 0x00e5ff, 0xffd400, 0x7dff3d, 0xffffff]) addBurst(center, c, 30, 16, 0.2, 1.6);
+}
+// the explosion throws every dancer up and outward, spinning
+function applyBlown(root, i, spot) {
+  if (!blownAt || snap.mode !== 'disco') return;
+  const t = Math.min(3.1, (performance.now() - blownAt) / 1000);   // fly, then land and stay put
+  const dir = new THREE.Vector3(spot.x || (i % 2 ? 1 : -1), 0, 1.2 + (i % 2) * 0.4).normalize();
+  const h = Math.max(-0.0, 14 * t - 0.5 * 9 * t * t);
+  root.position.x = spot.x + dir.x * 9 * t;
+  root.position.z = spot.z + dir.z * 6 * t;
+  root.position.y = t < 3.1 ? h : Math.max(0, h);
+  root.rotation.x = t * 6; root.rotation.z = t * 4 * (i % 2 ? 1 : -1);
+}
+function applyDiscoToBody(body, id, i) {
+  const D = snap.disco;
+  if (snap.mode !== 'disco' || !D || (snap.phase !== 'disco' && snap.phase !== 'over')) { body.dance = 0; body.partyGlow = 0; return; }
+  const p = D.players.find(q => q[0] === id);
+  body.dance = D.stage === 'dance' || D.stage === 'boom' ? Math.max(15, p ? p[1] : 0) : 15;
+  body.partyGlow = Math.max(0, (D.hype - 0.35) / 0.65);
+}
+function updateDisco(dt, t) {
+  const D = snap.disco;
+  const show = snap.mode === 'disco' && (snap.phase === 'disco' || snap.phase === 'over') && !!D;
+  disco.g.visible = show;
+  if (snap.mode === 'disco') updateVirtualAvatars(dt);
+  if (!show) {
+    discoEl.hud.style.display = 'none';
+    if (music && music.timer) music.stop();
+    blownAt = 0;
+    for (const [, el] of danceTags) el.remove();
+    danceTags.clear();
+    return;
+  }
+  const playing = inDiscoGame();
+  const local = !!D.local && D.host === me.id;
+  // camera: same-camera games report when every dancer's face is visible
+  if (local && performance.now() - discoFacesSent > 300 && (scorer.status === 'ready' || scorer.status === 'error')) {
+    discoFacesSent = performance.now();
+    if (scorer.status === 'ready') scorer.detect();
+    send({ t: 'cheeseFaces', ok: scorer.status === 'error' || scorer.facesOk });
+  }
+  const finding = local && D.stage === 'camera' && scorer.status === 'ready';
+  cheeseEl.hud.style.display = finding ? 'block' : 'none';
+  cheeseEl.preview.classList.toggle('big', finding);
+  if (finding) { cheeseEl.faceMsg.textContent = scorer.facesOk ? `✅ Found all ${scorer.count} dancers — get ready!` : `Line up side by side · found ${scorer.faces.length} of ${scorer.count} dancers`; drawFaceBoxes(true, false); }
+  // measure dancing and report it
+  if (D.stage === 'dance' && playing && (scorer.video || meter.fake)) {
+    const count = local ? (localIds?.length || 1) : 1;
+    if (local && scorer.status === 'ready') scorer.detect();
+    const en = meter.update(scorer.video, count, local ? scorer.faces : null);
+    if (performance.now() - energySent > 200) {
+      energySent = performance.now();
+      send(local ? { t: 'danceEnergy', energies: en.map(Math.round) } : { t: 'danceEnergy', e: Math.round(en[0]) });
+    }
+  }
+  // music follows the dancing
+  const avg = D.players.length ? D.players.reduce((a, p) => a + p[1], 0) / D.players.length / 100 : 0;
+  if (music && D.stage === 'dance') { if (!music.timer) music.start(); music.setLevel(avg, D.hype); }
+  // the room pulses with the beat, harder as the party meter fills
+  const beat = Math.pow(Math.max(0, Math.cos(t * Math.PI * 2 * 2)), 8);      // 120 BPM pulse
+  const hype = D.hype;
+  disco.ball.rotation.y += dt * 0.8;
+  disco.spots.forEach((s, i) => {
+    const a = t * (0.6 + hype) + i * Math.PI / 2;
+    const r = 5 + Math.sin(t * 0.7 + i) * 3;
+    s.sl.target.position.set(Math.cos(a) * r, 0, Math.sin(a) * r);
+    s.sl.intensity = 40 + hype * 120 + beat * 60 * (0.3 + hype);
+    s.beam.position.set(Math.cos(a) * r * 0.5, 4.3, Math.sin(a) * r * 0.5);
+    s.beam.lookAt(0, 8.5, 0); s.beam.rotateX(Math.PI / 2);
+    s.beam.material.opacity = 0.05 + hype * 0.12 + beat * 0.05;
+  });
+  disco.floorTiles.forEach((tile, k) => {
+    const on = ((k + Math.floor(t * 2)) % 4 === 0);
+    tile.material.opacity = (on ? 0.35 : 0.08) + beat * 0.3 * (0.3 + hype);
+  });
+  if (roomEdges) roomEdges.material.color.setHSL((t * 0.2) % 1, 1, 0.5 + beat * 0.3 * hype);
+  scene.background.setRGB(0.02 + beat * hype * 0.25, 0.02 + beat * hype * 0.05, 0.04 + beat * hype * 0.2);
+  // HUD: party meter + score bars under each dancer
+  discoEl.hud.style.display = 'block';
+  discoEl.meter.style.width = `${Math.round(hype * 100)}%`;
+  const slackers = D.players.filter(p => p[1] < DISCO.maxEnergy).map(p => p[4]);
+  discoEl.title.textContent = D.stage === 'camera' || D.stage === 'count' ? '🪩 GET READY TO DANCE 🪩' : D.stage === 'boom' ? '💥 BOOM! 💥' : hype > 0.66 ? '🔥 KEEP GOING!! 🔥' : '🪩 JUST DANCE! 🪩';
+  discoEl.hint.textContent = D.stage !== 'dance' ? '' : slackers.length ? `Dance harder: ${slackers.join(', ')}` : 'EVERYONE IS MAX DANCING — the party meter is filling!';
+  const spotsList = DISCO.spots;
+  const seen = new Set();
+  D.players.forEach(([id, energy, score, , name], i) => {
+    seen.add(id);
+    let el = danceTags.get(id);
+    if (!el) {
+      el = document.createElement('div'); el.className = 'danceTag';
+      el.innerHTML = `<div class="nm"></div><div class="bar"><div></div></div><div class="score"></div>`;
+      discoEl.tags.appendChild(el); danceTags.set(id, el);
+    }
+    const p = new THREE.Vector3(spotsList[i].x, -0.15, spotsList[i].z).project(camera);
+    el.style.left = `${(p.x * 0.5 + 0.5) * innerWidth}px`;
+    el.style.top = `${(-p.y * 0.5 + 0.5) * innerHeight}px`;
+    el.style.display = blownAt ? 'none' : 'block';
+    el.querySelector('.nm').textContent = name + (id === me.id ? ' (you)' : '');
+    el.querySelector('.bar > div').style.width = `${energy}%`;
+    el.querySelector('.score').textContent = score;
+  });
+  for (const [id, el] of danceTags) if (!seen.has(id)) { el.remove(); danceTags.delete(id); }
+}
+function showDiscoResults(m) {
+  const standings = m.standings || [];
+  const top = Math.max(1, ...standings.map(s => s[2]));
+  document.querySelector('#cheeseResults h2').textContent = m.boom ? '💥 DANCE DANCE DISCO — EVERYBODY WINS! 💥' : '🪩 DANCE DANCE DISCO — RESULTS';
+  $('resultsSub').textContent = m.reason || '';
+  const medals = ['🥇', '🥈', '🥉', '4️⃣'];
+  $('resultsRows').innerHTML = standings.map(([id, name, score], i) => `<div class="rrow ${i === 0 ? 'first' : ''}"><div class="place">${m.boom ? '🏆' : medals[i] || i + 1}</div><div class="nm">${name}</div>
+    <div class="track"><div class="bar" style="width:0%;background:linear-gradient(90deg,#00e5ff,#ff3df2)" data-w="${Math.max(6, (score / top) * 100)}"></div></div><div class="wins">${score}</div></div>`).join('');
+  resultsEl.style.display = 'block';
+  requestAnimationFrame(() => requestAnimationFrame(() => resultsEl.querySelectorAll('.bar').forEach(b => { b.style.width = b.dataset.w + '%'; })));
 }
 
 // ---------- invites ----------
@@ -1486,15 +1694,17 @@ function padsPressedBy(list) {
 function updatePadPanel() {
   aloneMode = null;
   if (snap.phase === 'lobby' && started) {
-    for (const [mode, list] of [['pvp', ARENA.pads], ['cheese', ARENA.cheesePads]]) {
+    for (const [mode, list] of [['pvp', ARENA.pads], ['cheese', ARENA.cheesePads], ['disco', ARENA.nextPads]]) {
       const on = [...new Set(padsPressedBy(list).flat())];
       if (on.length === 1 && on[0] === me.id) aloneMode = mode;
     }
   }
   padPanel.style.display = aloneMode ? 'block' : 'none';
   if (!aloneMode) return;
-  $('padTitle').textContent = aloneMode === 'cheese' ? '🧀 Say Cheese — invite friends, or play now with everyone on your camera' : '⚔️ 4xPVP needs at least 2 players — invite someone!';
-  $('btnSolo').style.display = aloneMode === 'cheese' ? '' : 'none';
+  $('padTitle').textContent = aloneMode === 'cheese' ? '🧀 Say Cheese — invite friends, or play now with everyone on your camera'
+    : aloneMode === 'disco' ? '🪩 Dance Dance Disco — invite friends, or dance now with everyone on your camera'
+    : '⚔️ 4xPVP needs at least 2 players — invite someone!';
+  $('btnSolo').style.display = aloneMode === 'pvp' ? 'none' : '';
 }
 function sendInvite() { if (aloneMode) { send({ t: 'invite', mode: aloneMode }); tone(880, 0.1, 'triangle', 0.07); } }
 async function copyLink() {
@@ -1504,7 +1714,7 @@ async function copyLink() {
     else { await navigator.clipboard.writeText(url); feed('🔗 Link copied — paste it to a friend!', '#00e5ff'); }
   } catch { feed(`🔗 Share this link: ${url}`, '#00e5ff'); }
 }
-function playSolo() { if (aloneMode === 'cheese') send({ t: 'soloStart' }); }
+function playSolo() { if (aloneMode === 'cheese' || aloneMode === 'disco') send({ t: 'soloStart', mode: aloneMode }); }
 function acceptInvite() {
   if (!pendingInvite) return;
   send({ t: 'acceptInvite', mode: pendingInvite.mode });
@@ -1513,7 +1723,7 @@ function acceptInvite() {
 function hideInvite() { pendingInvite = null; inviteToast.style.display = 'none'; clearTimeout(inviteTimer); }
 function onInvite(m) {
   pendingInvite = m;
-  $('inviteMsg').textContent = `📣 ${m.name} wants to play ${m.mode === 'cheese' ? '🧀 Say Cheese' : '⚔️ 4xPVP'}!`;
+  $('inviteMsg').textContent = `📣 ${m.name} wants to play ${m.mode === 'cheese' ? '🧀 Say Cheese' : m.mode === 'disco' ? '🪩 Dance Dance Disco' : '⚔️ 4xPVP'}!`;
   inviteToast.style.display = 'block';
   [660, 880, 1100].forEach((f, i) => setTimeout(() => tone(f, 0.1, 'triangle', 0.08), i * 100));
   clearTimeout(inviteTimer);
@@ -1791,7 +2001,7 @@ function updateLocal(dt) {
   const right = new THREE.Vector3(Math.cos(me.yaw), 0, -Math.sin(me.yaw));
   const move = new THREE.Vector3();
   // Say Cheese: stand in line facing the back wall
-  if (me.cheeseSpot && snap.mode === 'cheese' && (snap.phase === 'cheese' || snap.phase === 'over')) {
+  if (me.cheeseSpot && inCamGame()) {
     me.pos.set(me.cheeseSpot[0], 0, me.cheeseSpot[1]);
     me.yaw = Math.PI; me.pitch = 0.32; me.velY = 0;
     me.lockUntil = performance.now() + 150;
@@ -1870,7 +2080,9 @@ function updateLocal(dt) {
   if (a) {
     a.body.root.position.copy(me.pos);
     a.body.root.rotation.y = me.yaw;
+    applyDiscoToBody(a.body, me.id, discoIndex(me.id));
     a.body.update(dt, me.moving, me.pitch, downed);
+    if (discoIndex(me.id) >= 0) applyBlown(a.body.root, discoIndex(me.id), DISCO.spots[discoIndex(me.id)]);
     // you can still see yourself while cloaked, as a faint ghost
     const ghost = me.cloak > 0;
     a.body.mat.opacity = ghost ? 0.25 : 0.95;
@@ -1886,8 +2098,11 @@ function updateRemotes(dt) {
     dy = Math.atan2(Math.sin(dy), Math.cos(dy));
     a.body.root.rotation.y += dy * Math.min(1, dt * 12);
     const downed = a.data.hp <= 0 && snap.fighters.includes(id) && snap.phase !== 'lobby';
+    applyDiscoToBody(a.body, id, discoIndex(id));
     a.body.update(dt, a.data.moving, a.data.pitch, downed);
     a.body.root.visible = !a.cloaked;   // invisibility cloak: other players can't see you
+    const di = discoIndex(id);
+    if (di >= 0) applyBlown(a.body.root, di, DISCO.spots[di]);
   }
 }
 
@@ -1979,16 +2194,28 @@ function updatePads(dt, t) {
   // Lobby vs. active game: pads, corner signs and floor tints only show in the lobby (and during
   // the countdown so people can still hop on). During a game the room outline takes the game's color.
   const lobbyLook = snap.phase === 'lobby' || snap.phase === 'countdown';
+  if (snap.mode !== 'disco' || lobbyLook) scene.background.setHex(0x05060a);
   for (const pad of [...pads, ...cheesePads, ...nextPads, ...grayPads]) pad.group.visible = lobbyLook;
-  pvpSign.visible = cheeseSign.visible = pvpFloor.visible = cheeseFloor.visible = nextFloor.visible = lobbyLook;
-  if (roomEdges) roomEdges.material.color.setHex(lobbyLook ? 0xff3df2 : snap.mode === 'cheese' ? 0xffd400 : 0xff3030);
+  pvpSign.visible = cheeseSign.visible = discoSign.visible = pvpFloor.visible = cheeseFloor.visible = nextFloor.visible = lobbyLook;
+  if (roomEdges && snap.mode !== 'disco') roomEdges.material.color.setHex(lobbyLook ? 0xff3df2 : snap.mode === 'cheese' ? 0xffd400 : 0xff3030);
   // hatches glow when weapons are dropping
   hatchFlash = Math.max(0, hatchFlash - dt * 0.8);
   const fighting = snap.phase === 'fight';
   for (const h of hatches) h.material.color.setHex(fighting ? (hatchFlash > 0.5 && Math.floor(t * 8) % 2 ? 0xffaa00 : 0x663300) : 0x221100);
 }
 
+function inCamGame() {
+  return (snap.mode === 'cheese' && (snap.phase === 'cheese' || snap.phase === 'over'))
+    || (snap.mode === 'disco' && (snap.phase === 'disco' || snap.phase === 'over'));
+}
 function updateCamera(dt) {
+  // Dance Dance Disco: look at the line of dancers from the front
+  if (me.cheeseSpot && snap.mode === 'disco' && (snap.phase === 'disco' || snap.phase === 'over')) {
+    camera.position.set(0 + (shake > 0 ? (Math.random() - 0.5) * shake : 0), 4 + (shake > 0 ? (Math.random() - 0.5) * shake : 0), 11.5);
+    camera.lookAt(0, 2, -2);
+    shake = Math.max(0, shake - dt * 1.5);
+    return;
+  }
   // Say Cheese: fixed view from behind and above the line of players, looking at the back wall
   if (me.cheeseSpot && snap.mode === 'cheese' && (snap.phase === 'cheese' || snap.phase === 'over')) {
     camera.position.set(0, 4.5, 3.5);
@@ -2051,9 +2278,11 @@ function updateHud() {
       : `4xPVP: stand on a green pad in the northwest corner · ${occupied}/${ARENA.pads.length} pressed`;
     const cheeseOn = ARENA.cheesePads.filter(p => snap.players.some(pl => Math.hypot(pl.p[0] - p.x, pl.p[2] - p.z) <= p.r && pl.p[1] < 1)).length;
     if (onCheesePad(me.pos.x, me.pos.z, me.pos.y) || cheeseOn) status = `🧀 Say Cheese: stand on a yellow pad · ${cheeseOn}/${ARENA.cheesePads.length} pressed`;
-    if (onPadList(ARENA.nextPads, me.pos.x, me.pos.z, me.pos.y)) status = '🔵 A new game is coming to these blue pads soon!';
+    if (onPadList(ARENA.nextPads, me.pos.x, me.pos.z, me.pos.y)) status = '🪩 Dance Dance Disco: stand on a blue pad (2-4 dancers)';
     if (onPadList(ARENA.grayPads, me.pos.x, me.pos.z, me.pos.y)) status = 'These gray pads aren\'t used yet';
-  } else if (snap.phase === 'countdown') status = snap.mode === 'cheese'
+  } else if (snap.phase === 'countdown' && snap.mode === 'disco') status = isFighter() ? '🪩 Dance Dance Disco is starting — warm up!' : '🪩 Disco starting — hop on a free blue pad to join!';
+  else if (snap.phase === 'disco') status = inDiscoGame() ? '🪩 Dance Dance Disco' : '🪩 Watching Dance Dance Disco';
+  else if (snap.phase === 'countdown') status = snap.mode === 'cheese'
     ? (isFighter() ? '🧀 Say Cheese is starting — get your face ready!' : '🧀 Say Cheese starting — hop on a free yellow pad to join!')
     : (isFighter() ? 'Get ready!' : 'Battle starting — jump on a free pad to join!');
   else if (snap.phase === 'cheese') status = inCheeseGame() ? `🧀 Say Cheese · round ${snap.cheese?.round || 0}` : '🧀 Watching Say Cheese — look at the back wall!';
@@ -2073,8 +2302,8 @@ function updateHud() {
   ui.status.textContent = status;
 
   // fighter health bars
-  const cheeseOn = snap.mode === 'cheese' && snap.phase !== 'lobby';
-  document.getElementById('me').style.display = cheeseOn && inCheeseGame() ? 'none' : '';
+  const cheeseOn = (snap.mode === 'cheese' || snap.mode === 'disco') && snap.phase !== 'lobby';
+  document.getElementById('me').style.display = cheeseOn && (inCheeseGame() || inDiscoGame()) ? 'none' : '';
   document.getElementById('weapon').style.display = cheeseOn ? 'none' : '';
   if (!cheeseOn && (snap.phase === 'fight' || snap.phase === 'over' || snap.phase === 'countdown')) {
     ui.fighters.style.display = 'flex';
@@ -2134,6 +2363,7 @@ function frame() {
   updateLava(clock.t);
   updateRobots(dt, clock.t);
   updateCheese(dt, clock.t);
+  updateDisco(dt, clock.t);
   updatePadPanel();
   updateCamera(dt);
   updateHud();

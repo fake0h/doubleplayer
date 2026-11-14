@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { EMOTION_IDS, emotionById, CHEESE, CHEESE_SPOTS } from './shared/emotions.js';
+import { DISCO } from './shared/disco.js';
 import {
   WEAPONS, USES_PER_WEAPON, MAX_HEALTH, ARENA, FALL_MS, randomWeaponType, HIT_TUNING,
   randomSpecialType, usesOf, wallBox, wallHeightAt, segmentHitsWalls, jumpPadPos, BOMBS,
@@ -182,7 +183,8 @@ function onPad(player, pad) {
 function padOccupants(padList = ARENA.pads) {
   return padList.map(pad => [...players.values()].filter(pl => onPad(pl, pad)).map(pl => pl.id));
 }
-const modePads = (mode) => (mode === 'cheese' ? ARENA.cheesePads : ARENA.pads);
+const modePads = (mode) => (mode === 'cheese' ? ARENA.cheesePads : mode === 'disco' ? ARENA.nextPads : ARENA.pads);
+const asMode = (m) => (['pvp', 'cheese', 'disco'].includes(m) ? m : 'pvp');
 
 // One player per pad, each player counted once. Returns the list of fighters (0-4).
 function padFighters(occ) {
@@ -253,6 +255,7 @@ function spawnWeapon(forceType) {
 
 function resetToLobby() {
   game.phase = 'lobby';
+  disco = null;
   game.solo = false;
   game.mode = 'pvp';
   cheese = null;
@@ -299,7 +302,7 @@ function tickGame() {
   const t = now();
   if (game.phase === 'lobby') {
     // green pads start 4xPVP, yellow pads start Say Cheese
-    for (const mode of ['pvp', 'cheese']) {
+    for (const mode of ['pvp', 'cheese', 'disco']) {
       const fighters = padFighters(padOccupants(modePads(mode)));
       if (fighters.length >= 2) {   // a lone Say Cheese player starts with the "Play now" button instead
         game.phase = 'countdown';
@@ -317,13 +320,15 @@ function tickGame() {
     const joined = fighters.filter(id => !game.fighters.includes(id));
     for (const id of joined) announce(`${players.get(id)?.name} joined ${game.mode === 'cheese' ? 'Say Cheese' : 'the battle'}!`, 1500);
     game.fighters = fighters;
-    if (fighters.length < (game.mode === 'cheese' && game.solo ? 1 : 2)) {
+    if (fighters.length < (game.solo ? 1 : 2)) {
       game.phase = 'lobby';
       game.fighters = [];
       announce('Countdown cancelled — at least 2 players must stay on the pads', 2500);
     } else if (t >= game.phaseEndsAt) {
-      if (game.mode === 'cheese') startCheese(); else startFight();
+      if (game.mode === 'cheese') startCheese(); else if (game.mode === 'disco') startDisco(); else startFight();
     }
+  } else if (game.phase === 'disco') {
+    tickDisco(t);
   } else if (game.phase === 'cheese') {
     tickCheese(t);
   } else if (game.phase === 'fight') {
@@ -338,6 +343,86 @@ function tickGame() {
   } else if (game.phase === 'over') {
     if (t >= game.phaseEndsAt) resetToLobby();
   }
+}
+
+// ---------- Dance Dance Disco ----------
+// Players line up in the middle of the room and dance for their camera. Each browser measures how
+// much its player is moving (0-100 "energy"). Scores build up while you dance. The party meter only
+// fills while EVERYONE is max dancing; when it's full the dance floor explodes and everyone wins.
+let disco = null;
+function discoPlayers() {
+  if (!disco) return [];
+  if (disco.local) return players.has(disco.host) ? disco.players : [];
+  return disco.players.filter(dp => players.has(dp.id));
+}
+function startDisco() {
+  game.phase = 'disco';
+  const t = now();
+  const solo = game.fighters.length === 1;
+  disco = {
+    stage: solo ? 'count' : 'camera', stageEndsAt: t + (solo ? 30000 : DISCO.cameraWaitMs),
+    local: solo, host: solo ? game.fighters[0] : null, facesOk: !solo, hype: 0, danceStart: 0, lastTick: t,
+    players: game.fighters.map((id, i) => ({ id, name: players.get(id)?.name ?? '?', ready: false, energy: 0, score: 0, spot: DISCO.spots[i] })),
+  };
+  for (const dp of disco.players) {
+    const pl = players.get(dp.id);
+    if (pl) lineUp(pl, dp.spot, { local: solo, game: 'disco' });
+  }
+  announce(solo ? '🪩 DANCE DANCE DISCO! How many dancers are in front of the camera?' : '🪩 DANCE DANCE DISCO! Turn on your camera and get ready to dance', 3000);
+}
+function setDiscoCount(n) {
+  if (!disco?.local || disco.stage !== 'count') return;
+  n = Math.max(2, Math.min(4, Math.round(n) || 2));
+  disco.players = Array.from({ length: n }, (_, i) => ({
+    id: i === 0 ? disco.host : `v${disco.host}-${i + 1}`, name: `Dancer ${i + 1}`, virtual: i > 0,
+    ready: false, energy: 0, score: 0, spot: DISCO.spots[i],
+  }));
+  disco.stage = 'camera';
+  disco.stageEndsAt = now() + DISCO.cameraWaitMs;
+  disco.facesOk = false;
+  const host = players.get(disco.host);
+  if (host) send(host.ws, { t: 'cheeseCount', n, ids: disco.players.map(dp => dp.id) });
+  announce(`🪩 ${n} dancers! Line up side by side in front of the camera`, 3000);
+}
+function tickDisco(t) {
+  if (!disco) return;
+  const dt = Math.min(0.25, (t - disco.lastTick) / 1000);
+  disco.lastTick = t;
+  const dps = discoPlayers();
+  if (dps.length < (disco.local ? 1 : 2) && disco.stage !== 'boom') return endDisco(false, 'Not enough dancers left');
+  if (disco.stage === 'count') { if (t >= disco.stageEndsAt) setDiscoCount(2); return; }
+  if (disco.stage === 'camera') {
+    const ok = disco.local ? disco.facesOk && dps[0].ready : dps.every(dp => dp.ready);
+    if (ok || t >= disco.stageEndsAt) {
+      disco.stage = 'dance';
+      disco.danceStart = t;
+      broadcast({ t: 'discoGo' });
+      announce('🪩 JUST DANCE! Everyone max dancing fills the party meter!', 3000);
+    }
+    return;
+  }
+  if (disco.stage === 'dance') {
+    for (const dp of dps) dp.score += dp.energy * dt / 10;
+    const allMax = dps.every(dp => dp.energy >= DISCO.maxEnergy);
+    disco.hype = Math.max(0, Math.min(1, disco.hype + (allMax ? dt / DISCO.hypeRiseSec : -dt / DISCO.hypeFallSec)));
+    if (disco.hype >= 1) {
+      disco.stage = 'boom';
+      disco.stageEndsAt = t + DISCO.boomMs;
+      broadcast({ t: 'discoBoom' });
+    } else if (t - disco.danceStart > DISCO.maxMs) {
+      return endDisco(false, 'The music stopped before the dance floor exploded!');
+    }
+    return;
+  }
+  if (disco.stage === 'boom' && t >= disco.stageEndsAt) endDisco(true, 'The dance floor EXPLODED — everybody wins!');
+}
+function endDisco(boom, reason) {
+  const standings = (disco?.players || []).map(dp => [dp.id, dp.name, Math.round(dp.score)]).sort((a, b) => b[2] - a[2]);
+  game.phase = 'over';
+  game.winner = boom ? 'everyone' : standings[0]?.[0] ?? null;
+  game.phaseEndsAt = now() + 10000;
+  broadcast({ t: 'over', mode: 'disco', boom, reason, name: boom ? 'EVERYONE' : (standings[0]?.[1] ?? 'Nobody'), standings });
+  if (disco) disco.stage = 'done';
 }
 
 // ---------- Say Cheese ----------
@@ -820,19 +905,20 @@ wss.on('connection', (ws) => {
         break;
       }
       case 'soloStart': {
-        // alone on a yellow pad: start Say Cheese for the people in front of this camera
+        // alone on the yellow (Say Cheese) or blue (Dance Dance Disco) pads: play with everyone on this camera
         if (game.phase !== 'lobby') break;
-        const mine = padFighters(padOccupants(ARENA.cheesePads));
+        const mode = msg.mode === 'disco' ? 'disco' : 'cheese';
+        const mine = padFighters(padOccupants(modePads(mode)));
         if (mine.length === 1 && mine[0] === pl.id) {
-          game.phase = 'countdown'; game.mode = 'cheese'; game.solo = true;
+          game.phase = 'countdown'; game.mode = mode; game.solo = true;
           game.fighters = mine; game.phaseEndsAt = now() + 3000;
-          broadcast({ t: 'countdown', fighters: mine, mode: 'cheese' });
+          broadcast({ t: 'countdown', fighters: mine, mode });
         }
         break;
       }
       case 'invite': {
         // alone on a pad: invite everyone else in the arena
-        const mode = msg.mode === 'cheese' ? 'cheese' : 'pvp';
+        const mode = asMode(msg.mode);
         if (game.phase !== 'lobby' && game.phase !== 'countdown') break;
         if (!padFighters(padOccupants(modePads(mode))).includes(pl.id)) break;
         if (now() - (pl.lastInvite || 0) < 8000) break;   // no spamming
@@ -845,7 +931,7 @@ wss.on('connection', (ws) => {
       }
       case 'acceptInvite': {
         // jump onto a free pad of that game
-        const mode = msg.mode === 'cheese' ? 'cheese' : 'pvp';
+        const mode = asMode(msg.mode);
         if (game.phase !== 'lobby' && game.phase !== 'countdown') break;
         if (game.phase === 'countdown' && game.mode !== mode) break;
         const list = modePads(mode);
@@ -858,15 +944,26 @@ wss.on('connection', (ws) => {
         break;
       }
       case 'cheeseCount':
+        if (game.mode === 'disco') { if (disco?.local && disco.host === pl.id) setDiscoCount(msg.n); break; }
         if (cheese?.local && cheese.host === pl.id) setLocalCount(msg.n);
         break;
-      case 'cheeseFaces':
+      case 'cheeseFaces': {
         // local game: the host's camera reports whether it can see every player's face
-        if (cheese?.local && cheese.host === pl.id) cheese.facesOk = !!msg.ok;
+        const g = game.mode === 'disco' ? disco : cheese;
+        if (g?.local && g.host === pl.id) g.facesOk = !!msg.ok;
         break;
+      }
       case 'cheeseReady': {
-        const cp = cheese?.players.find(c => c.id === pl.id);
+        const g = game.mode === 'disco' ? disco : cheese;
+        const cp = g?.players.find(c => c.id === pl.id);
         if (cp) { cp.ready = true; cp.camera = !!msg.camera; }
+        break;
+      }
+      case 'danceEnergy': {
+        if (!disco || disco.stage !== 'dance') break;
+        const set = (dp, v) => { if (dp && Number.isFinite(v)) dp.energy = Math.max(0, Math.min(100, v)); };
+        if (disco.local && disco.host === pl.id && Array.isArray(msg.energies)) disco.players.forEach((dp, i) => set(dp, msg.energies[i]));
+        else set(disco.players.find(d => d.id === pl.id), msg.e);
         break;
       }
       case 'cheeseScore': {
@@ -964,6 +1061,11 @@ setInterval(() => {
     fighters: game.fighters,
     pads: padOccupants().map(o => o.length > 0),
     mode: game.mode,
+    disco: disco && game.phase !== 'lobby' ? {
+      stage: disco.stage, hype: +disco.hype.toFixed(3), left: Math.max(0, disco.stageEndsAt - t), local: disco.local, host: disco.host,
+      elapsed: disco.danceStart ? t - disco.danceStart : 0,
+      players: discoPlayers().map(dp => [dp.id, Math.round(dp.energy), Math.round(dp.score), dp.ready || disco.local ? 1 : 0, dp.name, dp.virtual ? 1 : 0]),
+    } : null,
     cheese: cheese && game.phase !== 'lobby' ? {
       stage: cheese.stage, round: cheese.round, emotion: cheese.emotion, left: Math.max(0, cheese.stageEndsAt - t),
       players: cheesePlayers().map(cp => [cp.id, Math.round(cp.score), Math.round(cp.best), cp.wins, cp.ready || cheese.local ? 1 : 0, cp.name, cp.virtual ? 1 : 0]),

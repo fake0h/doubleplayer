@@ -165,6 +165,20 @@
   .rrow .wins { font-weight: 900; font-size: 42px; color: #ffd400; text-align: center; }
   .rrow.first .nm { color: #ffd400; }
   @media (max-width: 900px) { .rrow { grid-template-columns: 40px 100px 1fr 40px; } .rrow .track { height: 110px; } .rrow .bar img, .rrow .bar .noimg { height: 94px; } }
+  /* ---------- Dance Dance Disco ---------- */
+  #discoHud { position: fixed; inset: 0; pointer-events: none; display: none; z-index: 6; }
+  #discoTop { position: absolute; top: 58px; left: 50%; transform: translateX(-50%); width: min(620px, 90vw); text-align: center; }
+  #discoTitle { font-size: 40px; font-weight: 900; background: linear-gradient(90deg, #ff3df2, #00e5ff, #ffd400, #ff3df2); background-size: 300% 100%;
+    -webkit-background-clip: text; background-clip: text; color: transparent; animation: discoText 2s linear infinite; text-shadow: none; }
+  @keyframes discoText { from { background-position: 0% 50%; } to { background-position: 300% 50%; } }
+  #discoMeterLabel { font-weight: 800; letter-spacing: 0.1em; margin: 6px 0 4px; text-shadow: 0 0 6px #000; }
+  #discoMeter { height: 22px; border-radius: 11px; background: rgba(255,255,255,0.12); overflow: hidden; border: 2px solid rgba(255,255,255,0.4); }
+  #discoMeter > div { height: 100%; width: 0%; background: linear-gradient(90deg, #ff3df2, #ffd400, #fff); transition: width 0.2s; }
+  #discoHint { margin-top: 6px; font-weight: 700; text-shadow: 0 0 6px #000; }
+  .danceTag { position: absolute; transform: translate(-50%, 0); width: 108px; text-align: center; font-weight: 800; font-size: 13px; text-shadow: 0 0 4px #000; }
+  .danceTag .bar { height: 12px; background: rgba(255,255,255,0.15); border-radius: 6px; overflow: hidden; margin: 3px 0; border: 1px solid rgba(255,255,255,0.4); }
+  .danceTag .bar > div { height: 100%; background: linear-gradient(90deg, #00e5ff, #ff3df2); transition: width 0.15s; }
+  .danceTag .score { font-size: 18px; color: #ffd400; }
   #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 30; transition: opacity 0.6s ease-out; }
   /* ---------- invites ---------- */
   #padPanel { position: fixed; left: 50%; top: 110px; transform: translateX(-50%); display: none; z-index: 7; text-align: center; pointer-events: auto; }
@@ -209,7 +223,7 @@
 
 <div id="start">
   <h1>DOUBLE PLAYER</h1>
-  <p>Two games, one in each corner: <b style="color:#39ff14">4xPVP</b> (green pads) is a weapons free-for-all for 2-4 players, last one standing wins. <b style="color:#ffd400">Say Cheese</b> (yellow pads): make the face the giant smiley asks for, using your camera. First to 3 wins!</p>
+  <p>Two games, one in each corner: <b style="color:#39ff14">4xPVP</b> (green pads) is a weapons free-for-all for 2-4 players, last one standing wins. <b style="color:#ffd400">Say Cheese</b> (yellow pads): make the face the giant smiley asks for, using your camera. <b style="color:#2a8cff">Dance Dance Disco</b> (blue pads): dance together until the floor explodes!</p>
   <p class="compat">(Touchscreen compatible)</p>
   <input id="nameInput" maxlength="16" placeholder="Your name (optional)" />
   <button id="playBtn">PLAY</button>
@@ -287,6 +301,10 @@
   <div id="cheeseNote" class="panel"></div>
 </div>
 <div id="cheeseResults"><h2>🏆 SAY CHEESE — FINAL RESULTS 🏆</h2><div class="sub" id="resultsSub"></div><div id="resultsRows"></div></div>
+<div id="discoHud">
+  <div id="discoTop"><div id="discoTitle">🪩 JUST DANCE! 🪩</div><div id="discoMeterLabel">PARTY METER</div><div id="discoMeter"><div></div></div><div id="discoHint"></div></div>
+  <div id="danceTags"></div>
+</div>
 <div id="flash"></div>
 <div id="padPanel" class="panel">
   <div class="title" id="padTitle">You're the only one here</div>

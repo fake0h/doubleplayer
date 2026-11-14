@@ -126,6 +126,30 @@ export class WireBody {
     this.applyMuscle(0);
   }
 
+  // Dance Dance Disco: dance moves that get bigger the harder the player is dancing (0-100)
+  updateDance(dt) {
+    const e = Math.min(1, this.dance / 100);
+    const t = performance.now() / 1000;
+    const ph = t * Math.PI * 2 * (1 + e);                  // faster moves when dancing harder
+    const s = Math.sin(ph), c = Math.cos(ph);
+    this.root.rotation.x = 0;
+    this.hips.position.y = 0.98 - Math.abs(s) * 0.12 * e;  // bouncing
+    this.hips.rotation.y = s * 0.35 * e;                    // hip swing
+    this.spine.rotation.set(-0.05, -s * 0.2 * e, c * 0.18 * e);
+    this.head.rotation.set(Math.abs(c) * 0.3 * e - 0.1, s * 0.2 * e, 0);
+    // arms pump up into the air, alternating
+    this.armL.shoulder.rotation.set(Math.PI * (0.25 + 0.65 * e * (0.5 + 0.5 * s)), 0, -0.3 - 0.5 * e);
+    this.armR.shoulder.rotation.set(Math.PI * (0.25 + 0.65 * e * (0.5 - 0.5 * s)), 0, 0.3 + 0.5 * e);
+    this.armL.elbow.rotation.x = -0.4 - 0.8 * e * Math.abs(c);
+    this.armR.elbow.rotation.x = -0.4 - 0.8 * e * Math.abs(s);
+    // stepping feet
+    this.legL.hip.rotation.x = Math.max(0, s) * 0.6 * e;
+    this.legR.hip.rotation.x = Math.max(0, -s) * 0.6 * e;
+    this.legL.knee.rotation.x = Math.max(0, s) * 0.9 * e;
+    this.legR.knee.rotation.x = Math.max(0, -s) * 0.9 * e;
+    if (this.flashT > 0) this.flashT = Math.max(0, this.flashT - dt * 4);
+  }
+
   setMuscle(level) {
     this.muscleTarget = Math.max(0, Math.min(MAX_MUSCLE, level));
   }
@@ -183,11 +207,12 @@ export class WireBody {
       if (Math.abs(this.muscle - this.muscleTarget) < 0.01) this.muscle = this.muscleTarget;
       this.applyMuscle(this.muscle);
     }
-    const glowing = this.muscle > MAX_MUSCLE - 0.3;
+    const party = this.partyGlow || 0;          // Dance Dance Disco: dancers glow as the party meter fills
+    const glowing = this.muscle > MAX_MUSCLE - 0.3 || party > 0.05;
     if (glowing && !this.glow) this.buildGlow();
     if (this.glow) {
       const t = performance.now() / 1000;
-      const on = glowing ? 1 : 0;
+      const on = this.muscle > MAX_MUSCLE - 0.3 ? 1 : party;
       const pulse = 0.5 + Math.sin(t * 4) * 0.5;
       this.glowMat.opacity += ((0.22 + pulse * 0.18) * on - this.glowMat.opacity) * Math.min(1, dt * 4);
       this.glowLight.intensity = on * (3 + pulse * 3);
@@ -230,6 +255,7 @@ export class WireBody {
 
   update(dt, moving, pitch = 0, downed = false) {
     this.updateMuscleAndGlow(dt);
+    if ((this.dance || 0) > 0) return this.updateDance(dt);
     // invincibility cheat: cycling rainbow skin
     if (this.rainbow) {
       const h = (performance.now() / 600) % 1;
