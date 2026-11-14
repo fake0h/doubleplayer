@@ -853,7 +853,8 @@ function connect() {
       case 'heal': onHeal(m); break;
       case 'bombs': onBombs(m); break;
       case 'admin': onAdminResult(m); break;
-      case 'cheeseStart': onCheeseStart(m); break;
+      case 'cheeseStart': onCheeseStart(m); hideInvite(); break;
+      case 'invite': onInvite(m); break;
       case 'cheeseCount': onCheeseCount(m); break;
       case 'cheeseRound': onCheeseRound(m); break;
       case 'cheeseFlash': onCheeseFlash(m); break;
@@ -1438,6 +1439,54 @@ function updateVirtualAvatars(dt) {
   }
 }
 
+// ---------- invites ----------
+const padPanel = $('padPanel'), inviteToast = $('inviteToast');
+let aloneMode = null;          // 'pvp' | 'cheese' when I'm the only one on that game's pads
+let pendingInvite = null, inviteTimer = 0;
+function padsPressedBy(list) {
+  return list.map(p => snap.players.filter(pl => Math.hypot(pl.p[0] - p.x, pl.p[2] - p.z) <= p.r && pl.p[1] < 1).map(pl => pl.id));
+}
+function updatePadPanel() {
+  aloneMode = null;
+  if (snap.phase === 'lobby' && started) {
+    for (const [mode, list] of [['pvp', ARENA.pads], ['cheese', ARENA.cheesePads]]) {
+      const on = [...new Set(padsPressedBy(list).flat())];
+      if (on.length === 1 && on[0] === me.id) aloneMode = mode;
+    }
+  }
+  padPanel.style.display = aloneMode ? 'block' : 'none';
+  if (!aloneMode) return;
+  $('padTitle').textContent = aloneMode === 'cheese' ? '🧀 Say Cheese — invite friends, or play now with everyone on your camera' : '⚔️ 4xPVP needs at least 2 players — invite someone!';
+  $('btnSolo').style.display = aloneMode === 'cheese' ? '' : 'none';
+}
+function sendInvite() { if (aloneMode) { send({ t: 'invite', mode: aloneMode }); tone(880, 0.1, 'triangle', 0.07); } }
+async function copyLink() {
+  const url = location.origin + location.pathname;
+  try {
+    if (navigator.share && touch.active) await navigator.share({ title: 'Double Player', text: 'Come play Double Player with me!', url });
+    else { await navigator.clipboard.writeText(url); feed('🔗 Link copied — paste it to a friend!', '#00e5ff'); }
+  } catch { feed(`🔗 Share this link: ${url}`, '#00e5ff'); }
+}
+function playSolo() { if (aloneMode === 'cheese') send({ t: 'soloStart' }); }
+function acceptInvite() {
+  if (!pendingInvite) return;
+  send({ t: 'acceptInvite', mode: pendingInvite.mode });
+  hideInvite();
+}
+function hideInvite() { pendingInvite = null; inviteToast.style.display = 'none'; clearTimeout(inviteTimer); }
+function onInvite(m) {
+  pendingInvite = m;
+  $('inviteMsg').textContent = `📣 ${m.name} wants to play ${m.mode === 'cheese' ? '🧀 Say Cheese' : '⚔️ 4xPVP'}!`;
+  inviteToast.style.display = 'block';
+  [660, 880, 1100].forEach((f, i) => setTimeout(() => tone(f, 0.1, 'triangle', 0.08), i * 100));
+  clearTimeout(inviteTimer);
+  inviteTimer = setTimeout(hideInvite, 30000);
+}
+const tapBtn = (id, fn) => $(id).addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+tapBtn('btnInvite', sendInvite); tapBtn('btnLink', copyLink); tapBtn('btnSolo', playSolo);
+tapBtn('btnJoin', acceptInvite); tapBtn('btnNope', hideInvite);
+for (const id of ['padPanel', 'inviteToast']) $(id).addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+
 let hitMarkerT = 0;
 function onHit(m) {
   const target = avatars.get(m.target);
@@ -1513,6 +1562,10 @@ addEventListener('keydown', (e) => {
   if (!started) return;
   if (adminOpen) return; // keypad handles its own keys
   if (e.code === 'KeyE') { if (canPickup() || !nearAdminPanel()) pickup(); else openAdmin(); }
+  if (e.code === 'KeyI') sendInvite();
+  if (e.code === 'KeyL' && aloneMode) copyLink();
+  if (e.code === 'KeyP') playSolo();
+  if (e.code === 'KeyJ') acceptInvite();
   if (e.code === 'KeyQ') send({ t: 'drop' });
   if (e.code === 'Space') e.preventDefault();
 });
@@ -1535,6 +1588,7 @@ function setStick(dx, dy) {
 document.addEventListener('touchstart', (e) => {
   enableTouch();
   if (!started || adminOpen) return; // let the start screen / admin keypad taps work normally
+  if (e.target.closest && e.target.closest('#padPanel, #inviteToast')) return; // invite buttons
   for (const t of e.changedTouches) {
     const el = t.target.closest ? t.target.closest('.tbtn, #stick') : null;
     if (el && el.id === 'stick') {
@@ -1956,7 +2010,7 @@ function updateHud() {
     status = others < 1 ? 'Waiting for a second player to join… (share this link!)'
       : `4xPVP: stand on a green pad in the northwest corner · ${occupied}/${ARENA.pads.length} pressed`;
     const cheeseOn = ARENA.cheesePads.filter(p => snap.players.some(pl => Math.hypot(pl.p[0] - p.x, pl.p[2] - p.z) <= p.r && pl.p[1] < 1)).length;
-    if (onCheesePad(me.pos.x, me.pos.z, me.pos.y) || cheeseOn) status = `🧀 Say Cheese: stand on a yellow pad · ${cheeseOn}/${ARENA.cheesePads.length} pressed (2-4 players)`;
+    if (onCheesePad(me.pos.x, me.pos.z, me.pos.y) || cheeseOn) status = `🧀 Say Cheese: stand on a yellow pad · ${cheeseOn}/${ARENA.cheesePads.length} pressed`;
   } else if (snap.phase === 'countdown') status = snap.mode === 'cheese'
     ? (isFighter() ? '🧀 Say Cheese is starting — get your face ready!' : '🧀 Say Cheese starting — hop on a free yellow pad to join!')
     : (isFighter() ? 'Get ready!' : 'Battle starting — jump on a free pad to join!');
@@ -2038,6 +2092,7 @@ function frame() {
   updateLava(clock.t);
   updateRobots(dt, clock.t);
   updateCheese(dt, clock.t);
+  updatePadPanel();
   updateCamera(dt);
   updateHud();
   renderer.render(scene, camera);

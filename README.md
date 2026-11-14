@@ -7,6 +7,8 @@ Everyone who opens the site appears as a glowing wireframe body in a big neon ro
 - **4xPVP** (northwest corner, neon-green pads, big 4xPVP sign facing the Say Cheese sign across the room): the weapons free-for-all described below.
 - **Say Cheese** (northeast corner, yellow pads, big smiley face): a face-making game played with your camera. See below.
 
+**Alone on a pad?** A panel pops up with **📣 Invite everyone** (key **I**): every other player in the arena gets a popup with a **Join** button (key **J**) that drops them onto a free pad. **🔗 Copy link** (key **L**) copies the game's address to send to friends who aren't on the site yet. On the Say Cheese pads there's also **▶ Play now** (key **P**) to start a game with everyone in front of your camera.
+
 **Lobby vs. game:** the pressure pads and corner signs only show in the lobby (and during the 3-second countdown, so people can still hop on). Once a game starts they disappear, and the glowing outline of the room turns red for 4xPVP or yellow for Say Cheese.
 
 The 4xPVP corner has **four pressure pads**. When 2 or more players stand on them, a **3, 2, 1** countdown starts, and anyone who hops on a free pad before it ends joins in. Then weapons rain down from the ceiling and it's a free-for-all. Knocked-out players lie down and watch, and the **last one standing wins**.
@@ -22,7 +24,7 @@ The 4xPVP corner has **four pressure pads**. When 2 or more players stand on the
 **1 to 4 players** stand on the yellow pads.
 
 - **2-4 people on their own devices:** everyone plays online with their own camera.
-- **One person starts it:** the game asks how many people are in front of that camera (2, 3 or 4) and lines up that many players side by side. The camera preview gets big and draws a labeled box around each face (Player 1 is on the left). The first emotion is called only once the camera can see every face, and the game waits again if someone steps out of view between rounds.
+- **One person presses Play now:** the game asks how many people are in front of that camera (2, 3 or 4) and lines up that many players side by side. The camera preview gets big and draws a labeled box around each face (Player 1 is on the left). The first emotion is called only once the camera can see every face, and the game waits again if someone steps out of view between rounds.
 
 When the countdown ends:
 

@@ -251,6 +251,7 @@ function spawnWeapon(forceType) {
 
 function resetToLobby() {
   game.phase = 'lobby';
+  game.solo = false;
   game.mode = 'pvp';
   cheese = null;
   for (const pl of players.values()) pl.lockUntil = 0;   // release anyone lined up for Say Cheese
@@ -298,8 +299,9 @@ function tickGame() {
     // green pads start 4xPVP, yellow pads start Say Cheese
     for (const mode of ['pvp', 'cheese']) {
       const fighters = padFighters(padOccupants(modePads(mode)));
-      if (fighters.length >= (mode === 'cheese' ? 1 : 2)) {   // one person can start Say Cheese (local players)
+      if (fighters.length >= 2) {   // a lone Say Cheese player starts with the "Play now" button instead
         game.phase = 'countdown';
+        game.solo = false;
         game.mode = mode;
         game.fighters = fighters;
         game.phaseEndsAt = t + 3000;
@@ -313,7 +315,7 @@ function tickGame() {
     const joined = fighters.filter(id => !game.fighters.includes(id));
     for (const id of joined) announce(`${players.get(id)?.name} joined ${game.mode === 'cheese' ? 'Say Cheese' : 'the battle'}!`, 1500);
     game.fighters = fighters;
-    if (fighters.length < (game.mode === 'cheese' ? 1 : 2)) {
+    if (fighters.length < (game.mode === 'cheese' && game.solo ? 1 : 2)) {
       game.phase = 'lobby';
       game.fighters = [];
       announce('Countdown cancelled — at least 2 players must stay on the pads', 2500);
@@ -808,6 +810,44 @@ wss.on('connection', (ws) => {
         const ok = String(msg.code) === ADMIN_CODE;
         if (ok) pl.admin = true; else pl.adminTries++;
         send(ws, { t: 'admin', ok });
+        break;
+      }
+      case 'soloStart': {
+        // alone on a yellow pad: start Say Cheese for the people in front of this camera
+        if (game.phase !== 'lobby') break;
+        const mine = padFighters(padOccupants(ARENA.cheesePads));
+        if (mine.length === 1 && mine[0] === pl.id) {
+          game.phase = 'countdown'; game.mode = 'cheese'; game.solo = true;
+          game.fighters = mine; game.phaseEndsAt = now() + 3000;
+          broadcast({ t: 'countdown', fighters: mine, mode: 'cheese' });
+        }
+        break;
+      }
+      case 'invite': {
+        // alone on a pad: invite everyone else in the arena
+        const mode = msg.mode === 'cheese' ? 'cheese' : 'pvp';
+        if (game.phase !== 'lobby' && game.phase !== 'countdown') break;
+        if (!padFighters(padOccupants(modePads(mode))).includes(pl.id)) break;
+        if (now() - (pl.lastInvite || 0) < 8000) break;   // no spamming
+        pl.lastInvite = now();
+        for (const other of players.values()) {
+          if (other.id !== pl.id) send(other.ws, { t: 'invite', from: pl.id, name: pl.name, mode });
+        }
+        send(ws, { t: 'msg', text: `📣 Invite sent to ${players.size - 1} player${players.size === 2 ? '' : 's'}`, ms: 2500 });
+        break;
+      }
+      case 'acceptInvite': {
+        // jump onto a free pad of that game
+        const mode = msg.mode === 'cheese' ? 'cheese' : 'pvp';
+        if (game.phase !== 'lobby' && game.phase !== 'countdown') break;
+        if (game.phase === 'countdown' && game.mode !== mode) break;
+        const list = modePads(mode);
+        const occ = padOccupants(list);
+        const i = occ.findIndex(o => o.length === 0);
+        if (i < 0) { send(ws, { t: 'msg', text: 'Sorry, all the pads are taken!', ms: 2500 }); break; }
+        pl.p = [list[i].x, 0, list[i].z];
+        pl.lockUntil = now() + 600;
+        send(ws, { t: 'teleport', p: pl.p, yaw: pl.yaw, lockMs: 600, launchMs: 450 });
         break;
       }
       case 'cheeseCount':
