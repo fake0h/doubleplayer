@@ -115,7 +115,8 @@ export const emotionById = (id) => EMOTIONS.find(e => e.id === id);
 // Round timing for Say Cheese
 export const CHEESE = { poseMs: 10000, photoWaitMs: 2500, revealMs: 3500, cameraWaitMs: 15000, winsToWin: 3 };
 
-// Where the 4 players line up, facing the back wall (south wall, opposite the admin panel)
+// Where the 4 players line up, facing the back wall (south wall, opposite the admin panel).
+// Looking at the back wall, +x is on the left, so Player 1 stands on the left like in the camera preview.
 export const CHEESE_SPOTS = [
-  { x: -4.5, z: 15 }, { x: -1.5, z: 15 }, { x: 1.5, z: 15 }, { x: 4.5, z: 15 },
+  { x: 4.5, z: 15 }, { x: 1.5, z: 15 }, { x: -1.5, z: 15 }, { x: -4.5, z: 15 },
 ];

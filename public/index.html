@@ -142,6 +142,12 @@
   .crow.me .top { color: #ffd400; }
   #cheesePreview { position: absolute; left: 16px; bottom: 16px; width: 220px; border: 3px solid #ffd400; border-radius: 10px; overflow: hidden; background: #000; display: none; }
   #cheesePreview video { width: 100%; display: block; transform: scaleX(-1); }
+  #cheesePreview canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  #cheesePreview.big { left: 50%; bottom: auto; top: 50%; transform: translate(-50%, -50%); width: min(640px, 80vw); }
+  #cheesePreview.fakecam { min-height: 160px; background: #223; }
+  #cheesePreview.big.fakecam { min-height: 360px; }
+  #faceMsg { position: absolute; left: 0; right: 0; top: 0; text-align: center; font: 900 20px system-ui, sans-serif; color: #fff; background: rgba(0,0,0,0.6); padding: 6px; display: none; }
+  #cheesePreview.big #faceMsg { display: block; }
   #myRating { position: absolute; left: 0; right: 0; bottom: 0; text-align: center; font: 900 28px system-ui, sans-serif; color: #ffd400; background: rgba(0,0,0,0.55); padding: 2px 0; }
   #cheeseNote { position: absolute; left: 16px; bottom: 16px; max-width: 300px; display: none; }
   #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 30; transition: opacity 0.6s ease-out; }
@@ -229,16 +235,27 @@
 <div id="cheeseCam">
   <div class="box">
     <h2>🧀 SAY CHEESE</h2>
+    <div id="camCount" style="display:none">
+      <p>How many players are in front of this camera?</p>
+      <div style="display:flex;gap:10px">
+        <button class="cnt" data-n="2" style="background:#ffd400;color:#1a1400">2</button>
+        <button class="cnt" data-n="3" style="background:#ffd400;color:#1a1400">3</button>
+        <button class="cnt" data-n="4" style="background:#ffd400;color:#1a1400">4</button>
+      </div>
+      <p><small>Stand side by side facing the camera. Player 1 is on the left.</small></p>
+    </div>
+    <div id="camAsk">
     <p>The giant smiley will ask for a face. Make it with your real face! Your camera rates how well you match, and the best face each round gets its photo on the wall.<br><small>Your video stays on your device. Only the round winner's snapshot is shared.</small></p>
     <button id="camYes">📷 Turn on my camera</button>
     <button id="camNo">Play without a camera (you can't score)</button>
     <div id="camMsg"></div>
+    </div>
   </div>
 </div>
 <div id="cheeseHud">
   <div id="cheeseTop"><div id="cheeseEmotion"></div><div id="cheeseTimer"></div></div>
   <div id="cheeseBoard" class="panel"></div>
-  <div id="cheesePreview"><div id="myRating">0</div></div>
+  <div id="cheesePreview"><canvas id="faceOverlay"></canvas><div id="faceMsg"></div><div id="myRating">0</div></div>
   <div id="cheeseNote" class="panel"></div>
 </div>
 <div id="flash"></div>

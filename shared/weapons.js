@@ -125,12 +125,13 @@ export const ARENA = {
   size: 60,          // square room, -30..30 on x and z
   height: 40,        // tall enough for the jump pads to fling you sky-high
   // The square has 4 quadrants. Two corners hold game-mode pads:
-  // 4xPVP (southwest corner, neon green): 2+ players start the weapons free-for-all for up to 4
+  // 4xPVP (northwest corner, neon green, facing the Say Cheese corner across the room):
+  // 2+ players start the weapons free-for-all for up to 4
   pads: [
-    { x: -24.5, z: 17.5, r: 2.2 },
-    { x: -17.5, z: 17.5, r: 2.2 },
-    { x: -24.5, z: 24.5, r: 2.2 },
-    { x: -17.5, z: 24.5, r: 2.2 },
+    { x: -24.5, z: -17.5, r: 2.2 },
+    { x: -17.5, z: -17.5, r: 2.2 },
+    { x: -24.5, z: -24.5, r: 2.2 },
+    { x: -17.5, z: -24.5, r: 2.2 },
   ],
   // Say Cheese (northeast corner, yellow): game still being designed
   cheesePads: [
@@ -177,8 +178,9 @@ export function jumpPadPos(i, t) {
   const sp = ARENA.jumpPadMoveSpeed;
   const a = t * sp * (i % 2 === 0 ? 1 : -1.3) + i * Math.PI / 2 + Math.PI / 4;
   // two tracks: pads 0 & 2 on an outer ring, pads 1 & 3 on an inner ring (so they never collide)
-  // outer track dips inward near the 4xPVP and Say Cheese corners so pads never roll over them
-  const dip = Math.pow(Math.max(0, Math.cos(2 * (a - 3 * Math.PI / 4))), 2);
+  // outer track dips inward near the 4xPVP (northwest) and Say Cheese (northeast) corners
+  // so jump pads never roll over the game pads
+  const dip = Math.max(...[-3 * Math.PI / 4, -Math.PI / 4].map(c => Math.pow(Math.max(0, Math.cos(a - c)), 6)));
   const r = i % 2 === 0 ? 23.5 + 1.5 * Math.sin(t * sp * 2.3 + i * 1.7) - 6.5 * dip : 11.4 + 0.6 * Math.sin(t * sp * 2.3 + i * 1.7);
   return { x: Math.cos(a) * r, z: Math.sin(a) * r };
 }

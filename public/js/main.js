@@ -4,7 +4,7 @@ import { WireBody } from './body.js';
 import { buildWeaponMesh, animateWeaponMesh, buildRobot } from './weaponMeshes.js';
 import { Smiley } from './smiley.js';
 import { FaceScorer } from './cheese.js';
-import { emotionById, CHEESE } from '/shared/emotions.js';
+import { emotionById, CHEESE, CHEESE_SPOTS } from '/shared/emotions.js';
 
 // ---------- renderer / scene ----------
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -447,7 +447,7 @@ function wallSign(draw, w, h, pos, rotY) {
   scene.add(m);
   return m;
 }
-// 4xPVP on the west wall above the green pads
+// 4xPVP on the west wall above the green pads (northwest corner, facing the Say Cheese sign)
 const pvpSign = wallSign((x, W, Hc) => {
   x.fillStyle = 'rgba(2,12,2,0.85)'; x.fillRect(0, 0, W, Hc);
   x.strokeStyle = '#39ff14'; x.lineWidth = 18; x.shadowColor = '#39ff14'; x.shadowBlur = 30;
@@ -456,9 +456,9 @@ const pvpSign = wallSign((x, W, Hc) => {
   x.font = '900 300px sans-serif'; x.fillText('4xPVP', W / 2, Hc * 0.45);
   x.shadowBlur = 0; x.fillStyle = '#d8ffd0'; x.font = 'bold 56px sans-serif';
   x.fillText('Weapons free-for-all · 2-4 players · stand on a green pad', W / 2, Hc * 0.82, W - 80);
-}, 12, 6, new THREE.Vector3(-HALF + 0.1, 6, 21), Math.PI / 2);
+}, 12, 6, new THREE.Vector3(-HALF + 0.1, 6, -21), Math.PI / 2);
 const pvpFloor = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), new THREE.MeshBasicMaterial({ color: PVP_GREEN, transparent: true, opacity: 0.06, depthWrite: false }));
-pvpFloor.rotation.x = -Math.PI / 2; pvpFloor.position.set(-21, 0.015, 21); scene.add(pvpFloor);
+pvpFloor.rotation.x = -Math.PI / 2; pvpFloor.position.set(-21, 0.015, -21); scene.add(pvpFloor);
 // Say Cheese: big yellow smiley on the east wall above the yellow pads
 const cheeseSign = wallSign((x, W, Hc) => {
   const cx = W / 2, cy = Hc * 0.42, r = Hc * 0.34;
@@ -854,6 +854,7 @@ function connect() {
       case 'bombs': onBombs(m); break;
       case 'admin': onAdminResult(m); break;
       case 'cheeseStart': onCheeseStart(m); break;
+      case 'cheeseCount': onCheeseCount(m); break;
       case 'cheeseRound': onCheeseRound(m); break;
       case 'cheeseFlash': onCheeseFlash(m); break;
       case 'cheesePhoto': onCheesePhoto(m); break;
@@ -1182,9 +1183,15 @@ function onAdminResult(m) {
 
 // ---------- Say Cheese client ----------
 const scorer = new FaceScorer();
-const cheeseEl = { cam: $('cheeseCam'), hud: $('cheeseHud'), emotion: $('cheeseEmotion'), timer: $('cheeseTimer'), board: $('cheeseBoard'),
+const cheeseEl = { count: $('camCount'), ask: $('camAsk'), overlay: $('faceOverlay'), faceMsg: $('faceMsg'), cam: $('cheeseCam'), hud: $('cheeseHud'), emotion: $('cheeseEmotion'), timer: $('cheeseTimer'), board: $('cheeseBoard'),
   preview: $('cheesePreview'), rating: $('myRating'), note: $('cheeseNote'), flash: $('flash'), camMsg: $('camMsg') };
 let cheeseScoreSent = 0;
+let cheeseFacesSent = 0;
+let localIds = null;          // local game (one camera, 2-4 people): cheese player ids, left to right
+const VIRTUAL_COLORS = [0x00e5ff, 0xff3df2, 0x7dff3d, 0xffb300];
+const virtualAvatars = new Map(); // id -> { body, label }
+function isLocalHost() { return !!snap.cheese?.local && snap.cheese.host === me.id; }
+function cheeseName(id) { return snap.cheese?.players.find(p => p[0] === id)?.[5] ?? avatars.get(id)?.data.name ?? '?'; }
 let lastTimerNum = null;
 function inCheeseGame() { return snap.mode === 'cheese' && !!snap.cheese && snap.cheese.players.some(p => p[0] === me.id); }
 function cheeseReady(camera) {
@@ -1197,7 +1204,8 @@ async function turnOnCamera() {
   const ok = await scorer.start();
   if (!ok) { cheeseEl.camMsg.textContent = 'No camera access — check your browser settings, or play without a camera.'; return; }
   if (scorer.video && !scorer.video.parentNode) cheeseEl.preview.prepend(scorer.video);
-  cheeseEl.preview.style.display = scorer.video ? 'block' : 'none';
+  cheeseEl.preview.classList.toggle('fakecam', !scorer.video);
+  cheeseEl.preview.style.display = scorer.video || scorer.fake ? 'block' : 'none';
   if (scorer.status === 'error') {
     cheeseEl.note.textContent = '⚠️ Face tracking could not load on this device, so your faces can\'t be scored. You can still watch!';
     cheeseEl.note.style.display = 'block';
@@ -1206,14 +1214,37 @@ async function turnOnCamera() {
 }
 $('camYes').addEventListener('click', (e) => { e.stopPropagation(); turnOnCamera(); });
 $('camNo').addEventListener('click', (e) => { e.stopPropagation(); cheeseReady(false); });
-
-function onCheeseStart(m) {
-  me.cheeseSpot = m.spot;
-  document.exitPointerLock?.();
+document.querySelectorAll('#camCount .cnt').forEach(b => b.addEventListener('click', (e) => {
+  e.stopPropagation();
+  send({ t: 'cheeseCount', n: Number(b.dataset.n) });
+}));
+function showCameraAsk() {
+  cheeseEl.count.style.display = 'none';
+  cheeseEl.ask.style.display = 'block';
   if (scorer.status === 'ready') { cheeseReady(true); return; }
   if (scorer.fake) { turnOnCamera(); return; }
   cheeseEl.camMsg.textContent = '';
   cheeseEl.cam.style.display = 'flex';
+}
+
+function onCheeseStart(m) {
+  me.cheeseSpot = m.spot;
+  localIds = null;
+  document.exitPointerLock?.();
+  if (m.local) {
+    // started alone: ask how many people are playing on this camera first
+    cheeseEl.count.style.display = 'block';
+    cheeseEl.ask.style.display = 'none';
+    cheeseEl.cam.style.display = 'flex';
+    return;
+  }
+  scorer.setCount(1);
+  showCameraAsk();
+}
+function onCheeseCount(m) {
+  localIds = m.ids;
+  scorer.setCount(m.n);
+  showCameraAsk();
 }
 const aOrAn = (word) => (/^[aeiou]/i.test(word) ? 'AN' : 'A');
 function drawCheeseTitle(text, sub = '') {
@@ -1238,7 +1269,7 @@ function onCheeseFlash(m) {
   cheeseEl.flash.style.opacity = 0.95;
   requestAnimationFrame(() => { cheeseEl.flash.style.transition = 'opacity 0.8s ease-out'; cheeseEl.flash.style.opacity = 0; });
   noise(0.15, 0.25); tone(1800, 0.08, 'square', 0.06);
-  const names = m.winners.map(id => avatars.get(id)?.data.name ?? '?');
+  const names = m.winners.map(id => cheeseName(id));
   const name = emotionById(m.emotion)?.name ?? '';
   if (names.length) {
     banner(`📸 ${names.join(' & ')} ${names.length > 1 ? 'tie' : 'wins'} the round!`, 2500);
@@ -1248,7 +1279,10 @@ function onCheeseFlash(m) {
     drawCheeseTitle('📸 Nobody scored that round!');
   }
   // the winner's browser sends the snapshot from their best moment
-  if (m.photoFrom === me.id && scorer.bestPhoto) send({ t: 'cheesePhoto', data: scorer.bestPhoto });
+  if (localIds) {
+    const i = localIds.indexOf(m.photoFrom);
+    if (i >= 0 && scorer.bestPhotos[i]) send({ t: 'cheesePhoto', data: scorer.bestPhotos[i] });
+  } else if (m.photoFrom === me.id && scorer.bestPhoto) send({ t: 'cheesePhoto', data: scorer.bestPhoto });
 }
 function onCheesePhoto(m) {
   const img = new Image();
@@ -1277,6 +1311,7 @@ function updateCheese(dt, t) {
   if (!show) {
     photoFrame.visible = false; photoCaption.mesh.visible = false;
     cheeseEl.hud.style.display = 'none';
+    if (virtualAvatars.size) updateVirtualAvatars(dt);
     if (snap.phase === 'lobby') {
       if (me.cheeseSpot) { me.cheeseSpot = null; cheeseEl.cam.style.display = 'none'; cheeseEl.note.style.display = 'none'; cheeseEl.preview.style.display = 'none'; scorer.stop(); }
       photoMat.map = null; photoMat.color.set(0x222222);
@@ -1287,14 +1322,33 @@ function updateCheese(dt, t) {
   cheeseEl.hud.style.display = 'block';
   const playing = inCheeseGame();
   // live scoring during the 10-second pose window
-  if (C.stage === 'pose' && playing && (scorer.status === 'ready')) {
-    const sc = scorer.update(C.emotion);
-    if (performance.now() - cheeseScoreSent > 200) { cheeseScoreSent = performance.now(); send({ t: 'cheeseScore', s: Math.round(sc) }); }
-    cheeseEl.rating.textContent = `${Math.round(sc)}${scorer.faceSeen ? '' : ' · no face'}`;
+  const local = isLocalHost();
+  if (C.stage === 'pose' && playing && scorer.status === 'ready') {
+    const scs = scorer.update(C.emotion);
+    if (performance.now() - cheeseScoreSent > 200) {
+      cheeseScoreSent = performance.now();
+      send(local ? { t: 'cheeseScore', scores: scs.map(Math.round) } : { t: 'cheeseScore', s: Math.round(scs[0]) });
+    }
+    cheeseEl.rating.textContent = local ? scs.map((v, i) => `P${i + 1} ${Math.round(v)}`).join(' · ') : `${Math.round(scs[0])}${scorer.faceSeen ? '' : ' · no face'}`;
+  } else if (playing && scorer.status === 'ready') {
+    scorer.detect();   // keep finding faces between rounds
   }
+  if (local && scorer.status === 'ready' && performance.now() - cheeseFacesSent > 300) {
+    cheeseFacesSent = performance.now();
+    send({ t: 'cheeseFaces', ok: scorer.facesOk, n: scorer.faces.length });
+  }
+  // camera preview: big while we're finding faces, with a labeled box on every face
+  const finding = local && C.stage === 'camera' && scorer.status === 'ready';
+  cheeseEl.preview.classList.toggle('big', finding);
+  if (finding) cheeseEl.faceMsg.textContent = scorer.facesOk
+    ? `✅ Found all ${scorer.count} faces — get ready!`
+    : `Line up side by side · found ${scorer.faces.length} of ${scorer.count} faces`;
+  drawFaceBoxes(local, C.stage === 'pose');
   // big countdown 10..1, then FLASH
   const name = emotionById(C.emotion)?.name ?? '';
-  if (C.stage === 'camera') { cheeseEl.emotion.textContent = 'Waiting for cameras…'; cheeseEl.timer.textContent = Math.ceil(C.left / 1000); drawCheeseTitle('🧀 SAY CHEESE!', 'Players are turning on their cameras…'); }
+  if (C.stage === 'count') { cheeseEl.emotion.textContent = 'How many players?'; cheeseEl.timer.textContent = ''; drawCheeseTitle('🧀 SAY CHEESE!', 'Choosing how many players…'); }
+  else if (C.stage === 'camera' && C.local) { cheeseEl.emotion.textContent = 'Finding everyone\'s face…'; cheeseEl.timer.textContent = ''; drawCheeseTitle('🧀 SAY CHEESE!', 'Line up side by side so the camera can see every face'); }
+  else if (C.stage === 'camera') { cheeseEl.emotion.textContent = 'Waiting for cameras…'; cheeseEl.timer.textContent = Math.ceil(C.left / 1000); drawCheeseTitle('🧀 SAY CHEESE!', 'Players are turning on their cameras…'); }
   else if (C.stage === 'pose') {
     const n = Math.max(1, Math.ceil(C.left / 1000));
     cheeseEl.emotion.textContent = `Make ${aOrAn(name).toLowerCase()} ${name.toUpperCase()} face!`;
@@ -1305,13 +1359,67 @@ function updateCheese(dt, t) {
   else { cheeseEl.emotion.textContent = ''; cheeseEl.timer.textContent = ''; }
   // live ratings + wins for every player
   const rows = [...C.players].sort((a, b) => b[3] - a[3] || b[1] - a[1]);
-  cheeseEl.board.innerHTML = `<div style="font-weight:900;color:#ffd400;margin-bottom:8px">LIVE RATINGS · first to ${CHEESE.winsToWin} 🏆</div>` + rows.map(([id, score, best, wins, ready]) => {
-    const p = snap.players.find(x => x.id === id);
-    const nm = p ? p.name : '?';
+  cheeseEl.board.innerHTML = `<div style="font-weight:900;color:#ffd400;margin-bottom:8px">LIVE RATINGS · first to ${CHEESE.winsToWin} 🏆</div>` + rows.map(([id, score, best, wins, ready, name]) => {
+    const idx = C.players.findIndex(q => q[0] === id);
+    const p = snap.players.find(x => x.id === id) || { color: VIRTUAL_COLORS[idx % 4] };
+    const nm = name || p.name || '?';
     const val = C.stage === 'pose' ? score : best;
     return `<div class="crow ${id === me.id ? 'me' : ''}"><div class="top"><span style="color:${p ? hex(p.color) : '#fff'}">${nm}${id === me.id ? ' (you)' : ''}${ready ? '' : ' ⏳'}</span><span>${'🏆'.repeat(wins) || '—'} ${val}</span></div>
       <div class="bar"><div style="width:${val}%"></div></div></div>`;
   }).join('');
+  updateVirtualAvatars(dt);
+}
+
+// Boxes around each face in the camera preview, labeled Player 1..4 (left to right)
+function drawFaceBoxes(local, posing) {
+  const cv = cheeseEl.overlay;
+  const r = cheeseEl.preview.getBoundingClientRect();
+  if (!r.width) return;
+  if (cv.width !== Math.round(r.width) || cv.height !== Math.round(r.height)) { cv.width = Math.round(r.width); cv.height = Math.round(r.height); }
+  const x = cv.getContext('2d');
+  x.clearRect(0, 0, cv.width, cv.height);
+  scorer.faces.forEach((f, i) => {
+    const col = '#' + VIRTUAL_COLORS[i % 4].toString(16).padStart(6, '0');
+    const bx = f.box.x * cv.width, by = f.box.y * cv.height, bw = f.box.w * cv.width, bh = f.box.h * cv.height;
+    x.strokeStyle = col; x.lineWidth = 4; x.strokeRect(bx, by, bw, bh);
+    const label = local ? `P${i + 1}${posing ? ' ' + Math.round(scorer.scores[i] || 0) : ''}` : (posing ? String(Math.round(scorer.scores[0] || 0)) : 'YOU');
+    x.font = 'bold 18px system-ui, sans-serif';
+    const tw = x.measureText(label).width + 10;
+    x.fillStyle = col; x.fillRect(bx, by - 24, tw, 24);
+    x.fillStyle = '#000'; x.fillText(label, bx + 5, by - 6);
+  });
+}
+
+// Local game: avatars for players 2-4 (they don't have their own device)
+function updateVirtualAvatars(dt) {
+  const C = snap.cheese;
+  const want = new Set();
+  (C?.players || []).forEach(([id, , , , , name, virtual], i) => {
+    if (!virtual) return;
+    want.add(id);
+    let v = virtualAvatars.get(id);
+    if (!v) {
+      const body = new WireBody(VIRTUAL_COLORS[i % 4]);
+      const spot = CHEESE_SPOTS[i];
+      body.root.position.set(spot.x, 0, spot.z);
+      body.root.rotation.y = Math.PI;
+      scene.add(body.root);
+      const label = document.createElement('div');
+      label.className = 'label3d';
+      label.innerHTML = `<div class="nm" style="color:#${VIRTUAL_COLORS[i % 4].toString(16).padStart(6, '0')}">${name}</div>`;
+      ui.labels.appendChild(label);
+      v = { body, label };
+      virtualAvatars.set(id, v);
+    }
+    v.body.update(dt, false, 0.2, false);
+    const pos = v.body.root.position.clone().add(new THREE.Vector3(0, 2.25, 0)).project(camera);
+    v.label.style.display = pos.z < 1 ? 'block' : 'none';
+    v.label.style.left = `${(pos.x * 0.5 + 0.5) * innerWidth}px`;
+    v.label.style.top = `${(-pos.y * 0.5 + 0.5) * innerHeight}px`;
+  });
+  for (const [id, v] of virtualAvatars) {
+    if (!want.has(id)) { scene.remove(v.body.root); v.label.remove(); virtualAvatars.delete(id); }
+  }
 }
 
 let hitMarkerT = 0;
@@ -1825,7 +1933,7 @@ function updateHud() {
   if (snap.phase === 'lobby') {
     const others = snap.players.length - 1;
     status = others < 1 ? 'Waiting for a second player to join… (share this link!)'
-      : `4xPVP: stand on a green pad in the southwest corner · ${occupied}/${ARENA.pads.length} pressed`;
+      : `4xPVP: stand on a green pad in the northwest corner · ${occupied}/${ARENA.pads.length} pressed`;
     const cheeseOn = ARENA.cheesePads.filter(p => snap.players.some(pl => Math.hypot(pl.p[0] - p.x, pl.p[2] - p.z) <= p.r && pl.p[1] < 1)).length;
     if (onCheesePad(me.pos.x, me.pos.z, me.pos.y) || cheeseOn) status = `🧀 Say Cheese: stand on a yellow pad · ${cheeseOn}/${ARENA.cheesePads.length} pressed (2-4 players)`;
   } else if (snap.phase === 'countdown') status = snap.mode === 'cheese'

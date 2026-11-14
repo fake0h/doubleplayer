@@ -298,7 +298,7 @@ function tickGame() {
     // green pads start 4xPVP, yellow pads start Say Cheese
     for (const mode of ['pvp', 'cheese']) {
       const fighters = padFighters(padOccupants(modePads(mode)));
-      if (fighters.length >= 2) {
+      if (fighters.length >= (mode === 'cheese' ? 1 : 2)) {   // one person can start Say Cheese (local players)
         game.phase = 'countdown';
         game.mode = mode;
         game.fighters = fighters;
@@ -313,7 +313,7 @@ function tickGame() {
     const joined = fighters.filter(id => !game.fighters.includes(id));
     for (const id of joined) announce(`${players.get(id)?.name} joined ${game.mode === 'cheese' ? 'Say Cheese' : 'the battle'}!`, 1500);
     game.fighters = fighters;
-    if (fighters.length < 2) {
+    if (fighters.length < (game.mode === 'cheese' ? 1 : 2)) {
       game.phase = 'lobby';
       game.fighters = [];
       announce('Countdown cancelled — at least 2 players must stay on the pads', 2500);
@@ -341,24 +341,48 @@ function tickGame() {
 // browser rates their face from their camera (0-100) and reports it. Best face wins the round
 // and their photo goes up on the wall. First to 3 wins (with nobody tied for the lead) wins.
 let cheese = null;
-function cheesePlayers() { return cheese ? cheese.players.filter(cp => players.has(cp.id)) : []; }
+// Online: one player per device. Local: one device, 2-4 people in front of the same camera
+// (player 1 is the device's own player, the rest are "virtual" players owned by that device).
+function cheesePlayers() {
+  if (!cheese) return [];
+  if (cheese.local) return players.has(cheese.host) ? cheese.players : [];
+  return cheese.players.filter(cp => players.has(cp.id));
+}
+function lineUp(pl, spot, extra = {}) {
+  pl.p = [spot.x, 0, spot.z];
+  pl.yaw = Math.PI;                      // facing the back wall
+  pl.lockUntil = Infinity;               // stay in line for the whole game
+  pl.weapon = null;
+  send(pl.ws, { t: 'cheeseStart', spot: [spot.x, spot.z], ...extra });
+}
 function startCheese() {
   game.phase = 'cheese';
   const t = now();
+  const solo = game.fighters.length === 1;
   cheese = {
-    stage: 'camera', stageEndsAt: t + CHEESE.cameraWaitMs, round: 0, emotion: null, recent: [],
-    players: game.fighters.map((id, i) => ({ id, wins: 0, ready: false, score: 0, best: 0, spot: CHEESE_SPOTS[i] })),
+    stage: solo ? 'count' : 'camera', stageEndsAt: t + (solo ? 30000 : CHEESE.cameraWaitMs),
+    round: 0, emotion: null, recent: [], local: solo, host: solo ? game.fighters[0] : null, facesOk: !solo,
+    players: game.fighters.map((id, i) => ({ id, name: players.get(id)?.name ?? '?', wins: 0, ready: false, score: 0, best: 0, spot: CHEESE_SPOTS[i] })),
   };
   for (const cp of cheese.players) {
     const pl = players.get(cp.id);
-    if (!pl) continue;
-    pl.p = [cp.spot.x, 0, cp.spot.z];
-    pl.yaw = Math.PI;                      // facing the back wall
-    pl.lockUntil = Infinity;               // stay in line for the whole game
-    pl.weapon = null;
-    send(pl.ws, { t: 'cheeseStart', spot: [cp.spot.x, cp.spot.z] });
+    if (pl) lineUp(pl, cp.spot, { local: solo });
   }
-  announce('🧀 SAY CHEESE! Allow camera access to play', 3000);
+  announce(solo ? '🧀 SAY CHEESE! How many players are in front of the camera?' : '🧀 SAY CHEESE! Allow camera access to play', 3000);
+}
+function setLocalCount(n) {
+  if (!cheese?.local || cheese.stage !== 'count') return;
+  n = Math.max(2, Math.min(4, Math.round(n) || 2));
+  const host = players.get(cheese.host);
+  cheese.players = Array.from({ length: n }, (_, i) => ({
+    id: i === 0 ? cheese.host : `v${cheese.host}-${i + 1}`, name: `Player ${i + 1}`, virtual: i > 0,
+    wins: 0, ready: false, score: 0, best: 0, spot: CHEESE_SPOTS[i],
+  }));
+  cheese.stage = 'camera';
+  cheese.stageEndsAt = now() + 90000;   // generous: waiting until the camera finds every face
+  cheese.facesOk = false;
+  if (host) send(host.ws, { t: 'cheeseCount', n, ids: cheese.players.map(cp => cp.id) });
+  announce(`🧀 ${n} players! Line up side by side so the camera can see every face`, 3000);
 }
 function nextCheeseRound(t) {
   // pick an emotion we haven't used recently
@@ -376,9 +400,15 @@ function nextCheeseRound(t) {
 function tickCheese(t) {
   if (!cheese) return;
   const cps = cheesePlayers();
-  if (cps.length < 2) return endCheese('Not enough players left');
+  if (cps.length < (cheese.local ? 1 : 2)) return endCheese('Not enough players left');
+  if (cheese.stage === 'count') {
+    if (t >= cheese.stageEndsAt) setLocalCount(2);
+    return;
+  }
   if (cheese.stage === 'camera') {
-    if (cps.every(cp => cp.ready) || t >= cheese.stageEndsAt) nextCheeseRound(t);
+    // local: start once the camera can see every player's face; online: once everyone is ready
+    const ok = cheese.local ? cheese.facesOk && cps[0].ready : cps.every(cp => cp.ready);
+    if (ok || t >= cheese.stageEndsAt) nextCheeseRound(t);
   } else if (cheese.stage === 'pose' && t >= cheese.stageEndsAt) {
     // FLASH: highest score this round wins (ties share the win)
     const top = Math.max(...cps.map(cp => cp.best));
@@ -398,10 +428,11 @@ function tickCheese(t) {
     const most = Math.max(...cps.map(cp => cp.wins));
     const leaders = cps.filter(cp => cp.wins === most);
     if (most >= CHEESE.winsToWin && leaders.length === 1) {
-      const w = players.get(leaders[0].id);
-      return endCheese(`${w.name} won Say Cheese with ${most} wins!`, leaders[0].id);
+      return endCheese(`${leaders[0].name} won Say Cheese with ${most} wins!`, leaders[0].id);
     }
     if (most >= CHEESE.winsToWin) announce(`Tie at ${most} wins — keep going until there's one winner!`, 2500);
+    // local game: wait until everyone is back in the camera before the next emotion
+    if (cheese.local && !cheese.facesOk) { cheese.stage = 'camera'; cheese.stageEndsAt = t + 90000; return; }
     nextCheeseRound(t);
   }
 }
@@ -410,7 +441,7 @@ function endCheese(reason, winnerId = null) {
     const cps = cheesePlayers().sort((a, b) => b.wins - a.wins);
     winnerId = cps[0]?.id ?? null;
   }
-  const w = players.get(winnerId);
+  const w = cheese?.players.find(cp => cp.id === winnerId);
   game.phase = 'over';
   game.winner = winnerId;
   game.phaseEndsAt = now() + 7000;
@@ -779,25 +810,33 @@ wss.on('connection', (ws) => {
         send(ws, { t: 'admin', ok });
         break;
       }
+      case 'cheeseCount':
+        if (cheese?.local && cheese.host === pl.id) setLocalCount(msg.n);
+        break;
+      case 'cheeseFaces':
+        // local game: the host's camera reports whether it can see every player's face
+        if (cheese?.local && cheese.host === pl.id) cheese.facesOk = !!msg.ok;
+        break;
       case 'cheeseReady': {
         const cp = cheese?.players.find(c => c.id === pl.id);
         if (cp) { cp.ready = true; cp.camera = !!msg.camera; }
         break;
       }
       case 'cheeseScore': {
-        const cp = cheese?.players.find(c => c.id === pl.id);
-        if (cp && cheese.stage === 'pose' && Number.isFinite(msg.s)) {
-          cp.score = Math.max(0, Math.min(100, msg.s));
-          cp.best = Math.max(cp.best, cp.score);
-        }
+        if (!cheese || cheese.stage !== 'pose') break;
+        const set = (cp, v) => { if (cp && Number.isFinite(v)) { cp.score = Math.max(0, Math.min(100, v)); cp.best = Math.max(cp.best, cp.score); } };
+        if (cheese.local && cheese.host === pl.id && Array.isArray(msg.scores)) cheese.players.forEach((cp, i) => set(cp, msg.scores[i]));
+        else set(cheese.players.find(c => c.id === pl.id), msg.s);
         break;
       }
       case 'cheesePhoto': {
-        // the round winner's snapshot from their best moment, shown on the back wall for everyone
-        if (!cheese || cheese.photoFrom !== pl.id || typeof msg.data !== 'string') break;
-        if (!msg.data.startsWith('data:image/jpeg;base64,') || msg.data.length > 400000) break;
+        // close-up of the round winner's face from their best moment, shown on the back wall for everyone
+        if (!cheese || !cheese.photoFrom || typeof msg.data !== 'string') break;
+        const allowed = cheese.local ? cheese.host === pl.id : cheese.photoFrom === pl.id;
+        if (!allowed || !msg.data.startsWith('data:image/jpeg;base64,') || msg.data.length > 400000) break;
+        const cp = cheese.players.find(c => c.id === cheese.photoFrom);
         cheese.photoFrom = null;
-        broadcast({ t: 'cheesePhoto', id: pl.id, name: pl.name, emotion: cheese.emotion, data: msg.data });
+        broadcast({ t: 'cheesePhoto', id: cp?.id, name: cp?.name ?? pl.name, emotion: cheese.emotion, data: msg.data });
         break;
       }
       case 'adminMode': {
@@ -879,7 +918,8 @@ setInterval(() => {
     mode: game.mode,
     cheese: cheese && game.phase !== 'lobby' ? {
       stage: cheese.stage, round: cheese.round, emotion: cheese.emotion, left: Math.max(0, cheese.stageEndsAt - t),
-      players: cheesePlayers().map(cp => [cp.id, Math.round(cp.score), Math.round(cp.best), cp.wins, cp.ready ? 1 : 0]),
+      players: cheesePlayers().map(cp => [cp.id, Math.round(cp.score), Math.round(cp.best), cp.wins, cp.ready || cheese.local ? 1 : 0, cp.name, cp.virtual ? 1 : 0]),
+      local: cheese.local, host: cheese.host, facesOk: cheese.facesOk,
     } : null,
     walls: walls.map(w => [w.up ? 1 : 0, t - w.changedAt]),
     wallsLeft: Math.max(0, wallsActiveUntil - t),

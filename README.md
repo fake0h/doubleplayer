@@ -4,7 +4,7 @@ A 2-to-4-player 3D wireframe arena brawler that runs in the browser. **(Touchscr
 
 Everyone who opens the site appears as a glowing wireframe body in a big neon room split into four quadrants. Two corners hold games:
 
-- **4xPVP** (southwest corner, neon-green pads, big 4xPVP sign): the weapons free-for-all described below.
+- **4xPVP** (northwest corner, neon-green pads, big 4xPVP sign facing the Say Cheese sign across the room): the weapons free-for-all described below.
 - **Say Cheese** (northeast corner, yellow pads, big smiley face): a face-making game played with your camera. See below.
 
 **Lobby vs. game:** the pressure pads and corner signs only show in the lobby (and during the 3-second countdown, so people can still hop on). Once a game starts they disappear, and the glowing outline of the room turns red for 4xPVP or yellow for Say Cheese.
@@ -19,12 +19,17 @@ The 4xPVP corner has **four pressure pads**. When 2 or more players stand on the
 
 ## Say Cheese
 
-2 to 4 players stand on the yellow pads. When the countdown ends:
+**1 to 4 players** stand on the yellow pads.
+
+- **2-4 people on their own devices:** everyone plays online with their own camera.
+- **One person starts it:** the game asks how many people are in front of that camera (2, 3 or 4) and lines up that many players side by side. The camera preview gets big and draws a labeled box around each face (Player 1 is on the left). The first emotion is called only once the camera can see every face, and the game waits again if someone steps out of view between rounds.
+
+When the countdown ends:
 
 1. Each player's browser asks to use their camera, and the players line up four across facing the back wall (the south wall, opposite the admin panel).
 2. A giant yellow smiley appears on the back wall and calls out an emotion, making that face itself: happy, scared, funny, crazy, excited, sorry, sleepy, and 26 more (33 total).
 3. A 10 to 1 countdown runs while every player's camera rates their face live from 0 to 100. Everyone sees everyone's ratings.
-4. Then **FLASH**: the best face wins the round, and that player's snapshot from their best moment goes up on the back wall.
+4. Then **FLASH**: the best face wins the round, and a close-up of the winner's face from their best moment goes up on the back wall.
 5. About 3 seconds later the next round starts. The first player to **3 wins** takes the game. If two players are tied for the lead, rounds continue until one player leads alone.
 
 Face reading uses Google's MediaPipe face tracker, which runs inside each player's own browser. Live video never leaves the device: only the round winner's snapshot is sent to the other players. The server downloads the face model once (from Google) and serves it to players. Players without a camera can still join and watch, but they can't score.
