@@ -220,7 +220,7 @@ const adminPanel = (() => {
 const pads = ARENA.pads.map((p, i) => {
   const g = new THREE.Group();
   g.position.set(p.x, 0, p.z);
-  const color = i === 0 ? 0x00e5ff : 0xff3df2;
+  const color = [0x00e5ff, 0xff3df2, 0xa855ff, 0xffb300][i % 4]; // green is reserved for jump pads
   const base = new THREE.Mesh(new THREE.CylinderGeometry(p.r + 0.3, p.r + 0.4, 0.15, 40),
     new THREE.MeshStandardMaterial({ color: 0x1b1f2b, metalness: 0.6, roughness: 0.4 }));
   base.position.y = 0.075;
@@ -564,9 +564,13 @@ function connect() {
       case 'msg': feed(m.text); break;
       case 'countdown': {
         const names = m.fighters.map(id => avatars.get(id)?.data.name ?? '?');
-        banner(`${names[0]} vs ${names[1]}`, 3000);
+        banner(`${names.join(' vs ')}\nOthers: jump on a free pad to join!`, 3000);
         break;
       }
+      case 'out':
+        if (m.id === me.id) banner(`💀 You're out!\n${m.text}\nWatch the rest of the battle`, 3500);
+        tone(180, 0.4, 'sawtooth', 0.1, -120);
+        break;
       case 'fight':
         ui.countdown.textContent = 'FIGHT!';
         ui.countdown.style.display = 'block';
@@ -1365,9 +1369,14 @@ function updateHud() {
   if (snap.phase === 'lobby') {
     const others = snap.players.length - 1;
     status = others < 1 ? 'Waiting for a second player to join… (share this link!)'
-      : `Stand on a pressure pad · ${occupied}/2 pads pressed`;
-  } else if (snap.phase === 'countdown') status = 'Get ready!';
-  else if (snap.phase === 'fight') status = isFighter() ? 'Fight! Pick up weapons and attack' : 'Spectating the match';
+      : `Stand on a pressure pad · ${occupied}/${ARENA.pads.length} pressed · 2-4 players can battle`;
+  } else if (snap.phase === 'countdown') status = isFighter() ? 'Get ready!' : 'Battle starting — jump on a free pad to join!';
+  else if (snap.phase === 'fight') {
+    const alive = snap.fighters.filter(id => (snap.players.find(p => p.id === id)?.hp ?? 0) > 0).length;
+    status = !isFighter() ? 'Spectating the match'
+      : me.hp <= 0 ? `You're out — spectating · ${alive} left`
+      : `Fight! ${alive} fighters left`;
+  }
   if (snap.wallsLeft > 0) status += ` · 🧱 Maze: ${Math.ceil(snap.wallsLeft / 1000)}s`;
   if (me.inv > 0) status = `🌈 INVINCIBLE ${Math.ceil(me.inv / 1000)}s — run into your enemy! · ` + status;
   else if (snap.phase === 'over') status = 'Match over — back to the lobby soon';
@@ -1376,6 +1385,7 @@ function updateHud() {
   // fighter health bars
   if (snap.phase === 'fight' || snap.phase === 'over' || snap.phase === 'countdown') {
     ui.fighters.style.display = 'flex';
+    ui.fighters.classList.toggle('many', snap.fighters.length > 2);
     ui.fighters.innerHTML = snap.fighters.map(id => {
       const p = snap.players.find(x => x.id === id);
       if (!p) return '';

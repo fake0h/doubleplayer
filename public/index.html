@@ -100,7 +100,9 @@
   body.touch .keys.desk { display: none; }
   .keys.tch { display: none; }
   body.touch .keys.tch { display: grid; }
-  @media (max-width: 900px) { #start h1 { font-size: 44px; } .fbar { width: 180px; } #fighters { gap: 12px; } }
+  @media (max-width: 900px) { #start h1 { font-size: 44px; } .fbar { width: 150px; } #fighters { gap: 8px; } }
+  #fighters.many .fbar { width: 200px; }
+  #fighters.many { gap: 10px; }
   /* ---------- admin keypad ---------- */
   #admin { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; z-index: 20;
     background: rgba(0,0,0,0.6); }
@@ -149,7 +151,7 @@
 
 <div id="start">
   <h1>DOUBLE PLAYER</h1>
-  <p>Stand on a pressure pad. When another player stands on the other one, the fight begins.</p>
+  <p>Stand on a pressure pad. When 2 to 4 players are on the pads, the battle begins. Last one standing wins!</p>
   <p class="compat">(Touchscreen compatible)</p>
   <input id="nameInput" maxlength="16" placeholder="Your name (optional)" />
   <button id="playBtn">PLAY</button>

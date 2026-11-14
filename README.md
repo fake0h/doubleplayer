@@ -1,18 +1,18 @@
 # Double Player
 
-A 2-player 3D wireframe arena brawler that runs in the browser. **(Touchscreen compatible)**: play on a computer or an iPad.
+A 2-to-4-player 3D wireframe arena brawler that runs in the browser. **(Touchscreen compatible)**: play on a computer or an iPad.
 
-Everyone who opens the site appears as a glowing wireframe body in a big neon room. The room has two pressure pads. When two players stand on them at the same time, a **3, 2, 1** countdown starts. Then weapons rain down from the ceiling, and the two players fight until one of them hits 0 health.
+Everyone who opens the site appears as a glowing wireframe body in a big neon room. The room has **four pressure pads**. When 2 or more players stand on them, a **3, 2, 1** countdown starts, and anyone who hops on a free pad before it ends joins in. Then weapons rain down from the ceiling and it's a free-for-all. Knocked-out players lie down and watch, and the **last one standing wins**.
 
 ## The arena
 
 - **Maze walls** stay sunk in the floor until someone grabs the rare **Wall Breaker**. Then they rise for **30 seconds**, and every 7 seconds a new set comes up, making a fresh maze. Raised walls are **cover**: shots, swings and poop all stop at the wall. You can also land on top of a wall, and you'll drop back to the floor when it sinks. A glowing slot in the floor shows where each wall lives, and it flashes red while a wall is rising.
-- **Jump pads** (two of them) slowly roam around the outer part of the arena. Step on one and it flings you about 29m into the air, out over the arena. You get only a little steering on the way down.
+- **Jump pads** (four green ones) slowly roam around the arena on an inner and an outer track. Step on one and it flings you about 29m into the air, out over the arena. You get only a little steering on the way down.
 - **Jumping** is high: about 4.4m, enough to see over the action, but not over a raised wall.
 
 ## Admin panel
 
-A glowing **ADMIN** panel hangs on the north wall. Walk up to it and press **E**, **left click**, or tap **GRAB** to open the number pad. The right code (**812**) unlocks the cheat menu. The server checks the code, and you have to be standing at the panel to enter it:
+A glowing **ADMIN** panel hangs on the north wall. Walk up to it and press **E**, **left click**, or on a touchscreen tap **GRAB** (it glows when you're close enough) to open the number pad. The keypad has big buttons that work with touch, mouse, or your keyboard's number keys. The right code (**812**) unlocks the cheat menu. The server checks the code, and you have to be standing at the panel to enter it:
 
 - **Summon fake0h Spear**: puts a fake0h Fire Spear in your hand.
 - **Drop Bombs**: 100 bombs fall from the ceiling (you're immune).

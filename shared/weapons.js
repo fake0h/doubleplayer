@@ -113,10 +113,14 @@ export const BOMBS = { count: 100, spreadMs: 2500, fuseMs: 3000 };
 export const ARENA = {
   size: 60,          // square room, -30..30 on x and z
   height: 40,        // tall enough for the jump pads to fling you sky-high
+  // 4 pressure pads: 2+ players standing on them starts a free-for-all for up to 4
   pads: [
-    { x: -8, z: 0, r: 2.2 },
-    { x: 8,  z: 0, r: 2.2 },
+    { x: -8, z: -8, r: 2.2 },
+    { x: 8,  z: -8, r: 2.2 },
+    { x: -8, z: 8,  r: 2.2 },
+    { x: 8,  z: 8,  r: 2.2 },
   ],
+  maxFighters: 4,
   dropHeight: 36,
   gravity: 22,
   jumpSpeed: 13.9,   // 3x the original jump height (was 8)
@@ -124,6 +128,8 @@ export const ARENA = {
   jumpPads: [
     { x: -25, z: -25, r: 1.8 },
     { x: 25,  z: 25,  r: 1.8 },
+    { x: 25,  z: -25, r: 1.8 },
+    { x: -25, z: 25,  r: 1.8 },
   ],
   jumpPadSpeed: 36,  // ~29m up
   jumpPadMoveSpeed: 0.11, // how fast the jump pads roam around the arena
@@ -152,8 +158,9 @@ export const ARENA = {
 // arena on wobbly paths, staying clear of the pressure pads in the middle.
 export function jumpPadPos(i, t) {
   const sp = ARENA.jumpPadMoveSpeed;
-  const a = t * sp * (i === 0 ? 1 : -0.85) + i * Math.PI + Math.PI / 4;
-  const r = 19 + 5 * Math.sin(t * sp * 2.3 + i * 1.7);
+  const a = t * sp * (i % 2 === 0 ? 1 : -1.3) + i * Math.PI / 2 + Math.PI / 4;
+  // two tracks: pads 0 & 2 on an outer ring, pads 1 & 3 on an inner ring (so they never collide)
+  const r = i % 2 === 0 ? 23.5 + 1.5 * Math.sin(t * sp * 2.3 + i * 1.7) : 16.6 + 1 * Math.sin(t * sp * 2.3 + i * 1.7);
   return { x: Math.cos(a) * r, z: Math.sin(a) * r };
 }
 

@@ -152,10 +152,37 @@ function padOccupants() {
   return ARENA.pads.map(pad => [...players.values()].filter(pl => onPad(pl, pad)).map(pl => pl.id));
 }
 
-// Pick two different players, one on each pad
-function padPair(occ) {
-  for (const a of occ[0]) for (const b of occ[1]) if (a !== b) return [a, b];
-  return null;
+// One player per pad, each player counted once. Returns the list of fighters (0-4).
+function padFighters(occ) {
+  const taken = new Set();
+  for (const onThisPad of occ) {
+    const pick = onThisPad.find(id => !taken.has(id));
+    if (pick != null) taken.add(pick);
+  }
+  return [...taken].slice(0, ARENA.maxFighters);
+}
+const aliveFighters = () => game.fighters.filter(id => players.has(id) && players.get(id).hp > 0);
+const opponentsOf = (pl) => game.fighters.filter(id => id !== pl.id).map(id => players.get(id)).filter(o => o && o.hp > 0);
+function nearestOpponent(pl) {
+  let best = null, bd = Infinity;
+  for (const o of opponentsOf(pl)) {
+    const d = Math.hypot(o.p[0] - pl.p[0], o.p[2] - pl.p[2]);
+    if (d < bd) { bd = d; best = o; }
+  }
+  return best;
+}
+// The opponent you're aiming at: smallest angle off your aim, nearer wins ties
+function aimedOpponent(pl, origin, dir, melee) {
+  let best = null, bestScore = Infinity;
+  for (const o of opponentsOf(pl)) {
+    const to = [o.p[0] - origin[0], o.p[1] + 1.1 - origin[1], o.p[2] - origin[2]];
+    const flat = Math.hypot(to[0], to[2]);
+    const ang = flat < HIT_TUNING.bodyRadius ? 0
+      : melee ? angleBetween([dir[0], 0, dir[2]], [to[0], 0, to[2]]) : angleBetween(dir, to);
+    const score = ang + flat * 0.5;
+    if (score < bestScore) { bestScore = score; best = o; }
+  }
+  return best;
 }
 
 function send(ws, msg) { if (ws.readyState === 1) ws.send(JSON.stringify(msg)); }
@@ -230,21 +257,23 @@ function endFight(winnerId, reason) {
 function tickGame() {
   const t = now();
   if (game.phase === 'lobby') {
-    const pair = padPair(padOccupants());
-    if (pair) {
+    const fighters = padFighters(padOccupants());
+    if (fighters.length >= 2) {
       game.phase = 'countdown';
-      game.fighters = pair;
+      game.fighters = fighters;
       game.phaseEndsAt = t + 3000;
-      broadcast({ t: 'countdown', fighters: pair });
+      broadcast({ t: 'countdown', fighters });
     }
   } else if (game.phase === 'countdown') {
-    const occ = padOccupants();
-    const [a, b] = game.fighters;
-    const stillOn = (occ[0].includes(a) && occ[1].includes(b)) || (occ[0].includes(b) && occ[1].includes(a));
-    if (!stillOn || !players.has(a) || !players.has(b)) {
+    // players can hop on a free pad to join (or step off to leave) until the countdown ends
+    const fighters = padFighters(padOccupants());
+    const joined = fighters.filter(id => !game.fighters.includes(id));
+    for (const id of joined) announce(`${players.get(id)?.name} joined the battle!`, 1500);
+    game.fighters = fighters;
+    if (fighters.length < 2) {
       game.phase = 'lobby';
       game.fighters = [];
-      announce('Countdown cancelled — both players must stay on the pads', 2500);
+      announce('Countdown cancelled — at least 2 players must stay on the pads', 2500);
     } else if (t >= game.phaseEndsAt) {
       startFight();
     }
@@ -287,7 +316,15 @@ function damage(target, amount, attacker, weaponType) {
   target.hp = Math.max(0, target.hp - amount);
   target.lastHitAt = now();
   broadcast({ t: 'hit', target: target.id, from: attacker.id, dmg: amount, weapon: weaponType, hp: target.hp });
-  if (target.hp <= 0) endFight(attacker.id, `${attacker.name} defeated ${target.name} with the ${weaponName(weaponType)}`);
+  if (target.hp <= 0) {
+    const how = `${attacker.name} knocked out ${target.name} with the ${weaponName(weaponType)}`;
+    const alive = aliveFighters();
+    if (alive.length <= 1) endFight(alive[0] ?? attacker.id, how);
+    else {
+      broadcast({ t: 'out', id: target.id, by: attacker.id, text: how, left: alive.length });
+      announce(`💀 ${how} — ${alive.length} left!`, 2500);
+    }
+  }
 }
 
 function handleAttack(pl, msg) {
@@ -300,8 +337,8 @@ function handleAttack(pl, msg) {
 
   const dir = aimDir(pl, msg.dir);
   const origin = [pl.p[0], pl.p[1] + 1.45, pl.p[2]];
-  const opponentId = game.fighters.find(id => id !== pl.id);
-  const opp = players.get(opponentId);
+  // with up to 4 fighters, you hit whoever you're aiming at
+  const opp = aimedOpponent(pl, origin, dir, def.kind === 'melee');
   if (def.special && def.kind !== 'melee') return specialAttack(pl, opp, def, origin, dir);
   let hitId = null;
   let impact = null;
@@ -379,6 +416,7 @@ function specialAttack(pl, opp, def, origin, dir) {
     return use();
   }
 
+  if (def.kind === 'homing' || def.kind === 'berserk') opp = nearestOpponent(pl);
   if (!opp || opp.hp <= 0) return;
 
   if (def.kind === 'homing') {
@@ -580,11 +618,11 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     players.delete(pl.id);
     announce(`${pl.name} left`, 2000);
-    if ((game.phase === 'fight' || game.phase === 'countdown') && game.fighters.includes(pl.id)) {
-      const other = game.fighters.find(id => id !== pl.id);
-      if (game.phase === 'fight' && players.has(other)) endFight(other, `${pl.name} left the match`);
-      else resetToLobby();
+    if (game.phase === 'fight' && game.fighters.includes(pl.id)) {
+      const alive = aliveFighters();
+      if (alive.length <= 1) endFight(alive[0], `${pl.name} left the match`);
     }
+    // during the countdown, tickGame drops players who left
   });
 });
 
@@ -594,14 +632,17 @@ function tickRams(t) {
   for (const id of game.fighters) {
     const pl = players.get(id);
     if (!pl || t >= pl.invincibleUntil || pl.hp <= 0) continue;
-    const opp = players.get(game.fighters.find(f => f !== id));
-    if (!opp || opp.hp <= 0) continue;
-    const d = Math.hypot(opp.p[0] - pl.p[0], opp.p[2] - pl.p[2]);
-    if (d <= INVINCIBLE.ramRange && Math.abs(opp.p[1] - pl.p[1]) < 2 && t - pl.lastRam >= INVINCIBLE.ramCooldownMs) {
-      pl.lastRam = t;
-      broadcast({ t: 'fx', kind: 'ram', from: pl.id, to: opp.id, weapon: 'invincible' });
-      damage(opp, INVINCIBLE.ramDamage, pl, 'invincible');
+    if (t - pl.lastRam < INVINCIBLE.ramCooldownMs) continue;
+    let rammed = false;
+    for (const opp of opponentsOf(pl)) {
+      const d = Math.hypot(opp.p[0] - pl.p[0], opp.p[2] - pl.p[2]);
+      if (d <= INVINCIBLE.ramRange && Math.abs(opp.p[1] - pl.p[1]) < 2) {
+        broadcast({ t: 'fx', kind: 'ram', from: pl.id, to: opp.id, weapon: 'invincible' });
+        damage(opp, INVINCIBLE.ramDamage, pl, 'invincible');
+        rammed = true;
+      }
     }
+    if (rammed) pl.lastRam = t;
   }
 }
 
