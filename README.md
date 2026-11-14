@@ -26,11 +26,13 @@ The 4xPVP corner has **four pressure pads**. When 2 or more players stand on the
 
 When the countdown ends:
 
-1. Each player's browser asks to use their camera, and the players line up four across facing the back wall (the south wall, opposite the admin panel).
+1. The players line up four across facing the back wall (the south wall, opposite the admin panel).
 2. A giant yellow smiley appears on the back wall and calls out an emotion, making that face itself: happy, scared, funny, crazy, excited, sorry, sleepy, and 26 more (33 total).
-3. A 10 to 1 countdown runs while every player's camera rates their face live from 0 to 100. Everyone sees everyone's ratings.
+3. A quick 3, 2, 1 countdown runs while every player's camera rates their face live from 0 to 100. Everyone sees everyone's ratings.
 4. Then **FLASH**: the best face wins the round, and a close-up of the winner's face from their best moment goes up on the back wall.
 5. About 3 seconds later the next round starts. The first player to **3 wins** takes the game. If two players are tied for the lead, rounds continue until one player leads alone.
+
+The camera is connected when you press **PLAY** on the start screen, so Say Cheese starts right away when you step on a yellow pad. If you skipped it, the game asks again when Say Cheese starts.
 
 Face reading uses Google's MediaPipe face tracker, which runs inside each player's own browser. Live video never leaves the device: only the round winner's snapshot is sent to the other players. The server downloads the face model once (from Google) and serves it to players. Players without a camera can still join and watch, but they can't score.
 

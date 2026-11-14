@@ -1199,13 +1199,16 @@ function cheeseReady(camera) {
   cheeseEl.cam.style.display = 'none';
   if (!touch.active) renderer.domElement.requestPointerLock?.();
 }
+function attachPreview() {
+  if (scorer.video && !scorer.video.parentNode) cheeseEl.preview.prepend(scorer.video);
+  cheeseEl.preview.classList.toggle('fakecam', !scorer.video);
+  cheeseEl.preview.style.display = scorer.video || scorer.fake ? 'block' : 'none';
+}
 async function turnOnCamera() {
   cheeseEl.camMsg.textContent = 'Asking for your camera…';
   const ok = await scorer.start();
   if (!ok) { cheeseEl.camMsg.textContent = 'No camera access — check your browser settings, or play without a camera.'; return; }
-  if (scorer.video && !scorer.video.parentNode) cheeseEl.preview.prepend(scorer.video);
-  cheeseEl.preview.classList.toggle('fakecam', !scorer.video);
-  cheeseEl.preview.style.display = scorer.video || scorer.fake ? 'block' : 'none';
+  attachPreview();
   if (scorer.status === 'error') {
     cheeseEl.note.textContent = '⚠️ Face tracking could not load on this device, so your faces can\'t be scored. You can still watch!';
     cheeseEl.note.style.display = 'block';
@@ -1218,10 +1221,22 @@ document.querySelectorAll('#camCount .cnt').forEach(b => b.addEventListener('cli
   e.stopPropagation();
   send({ t: 'cheeseCount', n: Number(b.dataset.n) });
 }));
-function showCameraAsk() {
+async function showCameraAsk() {
   cheeseEl.count.style.display = 'none';
   cheeseEl.ask.style.display = 'block';
-  if (scorer.status === 'ready') { cheeseReady(true); return; }
+  // camera was connected when you pressed PLAY: wait for it if it's still warming up
+  if (scorer.status === 'asking' || scorer.status === 'loading') {
+    cheeseEl.cam.style.display = 'none';
+    while (scorer.status === 'asking' || scorer.status === 'loading') await new Promise(r => setTimeout(r, 200));
+  }
+  if (scorer.status === 'ready') { attachPreview(); cheeseReady(true); return; }
+  if (scorer.status === 'error') {
+    attachPreview();
+    cheeseEl.note.textContent = '⚠️ Face tracking could not load on this device, so your faces can\'t be scored. You can still watch!';
+    cheeseEl.note.style.display = 'block';
+    cheeseReady(false);
+    return;
+  }
   if (scorer.fake) { turnOnCamera(); return; }
   cheeseEl.camMsg.textContent = '';
   cheeseEl.cam.style.display = 'flex';
@@ -1313,7 +1328,8 @@ function updateCheese(dt, t) {
     cheeseEl.hud.style.display = 'none';
     if (virtualAvatars.size) updateVirtualAvatars(dt);
     if (snap.phase === 'lobby') {
-      if (me.cheeseSpot) { me.cheeseSpot = null; cheeseEl.cam.style.display = 'none'; cheeseEl.note.style.display = 'none'; cheeseEl.preview.style.display = 'none'; scorer.stop(); }
+      // keep the camera connected for the next game; just hide the preview
+      if (me.cheeseSpot) { me.cheeseSpot = null; cheeseEl.cam.style.display = 'none'; cheeseEl.note.style.display = 'none'; cheeseEl.preview.style.display = 'none'; }
       photoMat.map = null; photoMat.color.set(0x222222);
     }
     return;
@@ -1457,6 +1473,11 @@ function begin() {
   if (!actx) { try { actx = new AudioContext(); } catch {} }
   startEl.style.display = 'none';
   started = true;
+  // connect the camera now so Say Cheese is ready to go when you step on a yellow pad
+  if (scorer.status === 'idle') scorer.start().then(() => {
+    if (scorer.status === 'ready') feed('📷 Camera ready for Say Cheese', '#ffd400');
+    else if (scorer.status === 'error') feed('📷 Camera is on, but face tracking could not load on this device', '#ff8c2a');
+  });
   if (!touch.active) renderer.domElement.requestPointerLock?.();
 }
 // Mouse: hold right = run forward; left click = pick up (when next to a weapon) or attack
