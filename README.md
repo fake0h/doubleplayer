@@ -1,6 +1,6 @@
 # Double Player
 
-A 2-player 3D wireframe arena brawler that runs in the browser.
+A 2-player 3D wireframe arena brawler that runs in the browser. **(Touchscreen compatible)**: play on a computer or an iPad.
 
 Everyone who opens the site appears as a glowing wireframe body in a big neon room. The room has two pressure pads. When two players stand on them at the same time, a **3, 2, 1** countdown starts. Then weapons rain down from the ceiling, and the two players fight until one of them hits 0 health.
 
