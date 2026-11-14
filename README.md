@@ -59,6 +59,20 @@ Silly weapons drop often and deadly ones are rare. To change damage, range, cool
 | Q | Drop weapon |
 | Esc | Release mouse |
 
+### iPad / touch screens
+
+On-screen controls show up automatically on touch devices.
+
+| Control | Action |
+|---|---|
+| Left stick | Move (push all the way to run) |
+| Swipe on the right side | Look / aim |
+| ATTACK | Attack (hold to keep attacking) |
+| GRAB | Pick up a weapon (glows when one is in reach) |
+| JUMP / DROP | Jump / drop your weapon |
+
+Tip: in Safari, tap Share → **Add to Home Screen** to play full screen.
+
 ## Run it locally
 
 You need Node.js 18 or newer.

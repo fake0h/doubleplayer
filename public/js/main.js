@@ -28,7 +28,8 @@ sun.position.set(12, 30, 8);
 sun.castShadow = true;
 sun.shadow.camera.left = sun.shadow.camera.bottom = -35;
 sun.shadow.camera.right = sun.shadow.camera.top = 35;
-sun.shadow.mapSize.set(2048, 2048);
+const COARSE = matchMedia('(pointer: coarse)').matches;
+sun.shadow.mapSize.set(COARSE ? 1024 : 2048, COARSE ? 1024 : 2048);
 scene.add(sun);
 
 // ---------- the room ----------
@@ -163,6 +164,16 @@ const me = {
 const keys = {};
 let locked = false;
 let started = false;
+
+// ---------- touch controls (iPad / phones) ----------
+const touch = { active: false, move: { x: 0, y: 0 }, stickId: null, lookId: null, lastX: 0, lastY: 0, attackHeld: false, jump: false };
+function enableTouch() {
+  if (touch.active) return;
+  touch.active = true;
+  document.body.classList.add('touch');
+}
+if (COARSE) enableTouch();
+const canControl = () => locked || (touch.active && started);
 
 // ---------- world state from server ----------
 const avatars = new Map();   // id -> { body, label, target, yaw, data, weaponType }
@@ -477,9 +488,10 @@ function begin() {
   if (!actx) { try { actx = new AudioContext(); } catch {} }
   startEl.style.display = 'none';
   started = true;
-  renderer.domElement.requestPointerLock?.();
+  if (!touch.active) renderer.domElement.requestPointerLock?.();
 }
 renderer.domElement.addEventListener('click', () => {
+  if (touch.active) return;
   if (started && !locked) renderer.domElement.requestPointerLock?.();
   else if (locked) attack();
 });
@@ -500,6 +512,77 @@ addEventListener('keydown', (e) => {
 });
 addEventListener('keyup', (e) => { keys[e.code] = false; });
 addEventListener('blur', () => { for (const k in keys) keys[k] = false; });
+
+const stickEl = $('stick'), knobEl = $('knob');
+const STICK_R = 75;
+const buttons = { btnAttack: $('btnAttack'), btnGrab: $('btnGrab'), btnJump: $('btnJump'), btnDrop: $('btnDrop') };
+const btnTouch = new Map(); // touch id -> button id
+
+function setStick(dx, dy) {
+  const len = Math.hypot(dx, dy);
+  if (len > STICK_R) { dx *= STICK_R / len; dy *= STICK_R / len; }
+  touch.move.x = dx / STICK_R;
+  touch.move.y = dy / STICK_R;
+  knobEl.style.transform = `translate(${dx}px, ${dy}px)`;
+}
+
+document.addEventListener('touchstart', (e) => {
+  enableTouch();
+  if (!started) return; // let the start screen's tap work normally
+  for (const t of e.changedTouches) {
+    const el = t.target.closest ? t.target.closest('.tbtn, #stick') : null;
+    if (el && el.id === 'stick') {
+      touch.stickId = t.identifier;
+      const r = stickEl.getBoundingClientRect();
+      touch.stickCx = r.left + r.width / 2;
+      touch.stickCy = r.top + r.height / 2;
+      setStick(t.clientX - touch.stickCx, t.clientY - touch.stickCy);
+    } else if (el) {
+      btnTouch.set(t.identifier, el.id);
+      el.classList.add('down');
+      if (actx && actx.state === 'suspended') actx.resume();
+      if (el.id === 'btnAttack') { touch.attackHeld = true; attack(); }
+      if (el.id === 'btnGrab') pickup();
+      if (el.id === 'btnJump') touch.jump = true;
+      if (el.id === 'btnDrop') send({ t: 'drop' });
+    } else if (touch.lookId === null) {
+      touch.lookId = t.identifier;
+      touch.lastX = t.clientX; touch.lastY = t.clientY;
+    }
+  }
+  e.preventDefault();
+}, { passive: false });
+
+document.addEventListener('touchmove', (e) => {
+  if (!started) return;
+  for (const t of e.changedTouches) {
+    if (t.identifier === touch.stickId) setStick(t.clientX - touch.stickCx, t.clientY - touch.stickCy);
+    else if (t.identifier === touch.lookId) {
+      me.yaw -= (t.clientX - touch.lastX) * 0.006;
+      me.pitch = THREE.MathUtils.clamp(me.pitch - (t.clientY - touch.lastY) * 0.005, -1.1, 0.9);
+      touch.lastX = t.clientX; touch.lastY = t.clientY;
+    }
+  }
+  e.preventDefault();
+}, { passive: false });
+
+function endTouches(e) {
+  for (const t of e.changedTouches) {
+    if (t.identifier === touch.stickId) { touch.stickId = null; setStick(0, 0); }
+    if (t.identifier === touch.lookId) touch.lookId = null;
+    const id = btnTouch.get(t.identifier);
+    if (id) {
+      btnTouch.delete(t.identifier);
+      buttons[id].classList.remove('down');
+      if (id === 'btnAttack') touch.attackHeld = false;
+    }
+  }
+}
+document.addEventListener('touchend', endTouches);
+document.addEventListener('touchcancel', endTouches);
+// stop iOS pinch-zoom / double-tap zoom from hijacking the game
+document.addEventListener('gesturestart', (e) => e.preventDefault());
+document.addEventListener('dblclick', (e) => e.preventDefault());
 
 function isFighter() { return snap.fighters.includes(me.id); }
 
@@ -552,19 +635,28 @@ function updateLocal(dt) {
   const fwd = new THREE.Vector3(-Math.sin(me.yaw), 0, -Math.cos(me.yaw));
   const right = new THREE.Vector3(Math.cos(me.yaw), 0, -Math.sin(me.yaw));
   const move = new THREE.Vector3();
+  let sprint = keys.ShiftLeft || keys.ShiftRight;
+  if (touch.active && started && !downed && (touch.move.x || touch.move.y)) {
+    // analog stick: up on the stick = forward; push all the way to run
+    move.addScaledVector(fwd, -touch.move.y).addScaledVector(right, touch.move.x);
+    if (Math.hypot(touch.move.x, touch.move.y) > 0.92) sprint = true;
+  }
   if (locked && !downed) {
     if (keys.KeyW || keys.ArrowUp) move.add(fwd);
     if (keys.KeyS || keys.ArrowDown) move.sub(fwd);
     if (keys.KeyD || keys.ArrowRight) move.add(right);
     if (keys.KeyA || keys.ArrowLeft) move.sub(right);
   }
-  me.moving = move.lengthSq() > 0;
+  me.moving = move.lengthSq() > 0.0025;
   if (me.moving) {
-    const speed = (keys.ShiftLeft || keys.ShiftRight) ? 11 : 6.5;
-    move.normalize().multiplyScalar(speed * dt);
+    const speed = sprint ? 11 : 6.5;
+    if (move.lengthSq() > 1) move.normalize();
+    move.multiplyScalar(speed * dt);
     me.pos.add(move);
   }
-  if (locked && keys.Space && me.onGround && !downed) { me.velY = 8; me.onGround = false; }
+  if (((locked && keys.Space) || touch.jump) && me.onGround && !downed) { me.velY = 8; me.onGround = false; }
+  touch.jump = false;
+  if (touch.attackHeld) attack(); // hold ATTACK to keep swinging/firing
   me.velY -= 22 * dt;
   me.pos.y += me.velY * dt;
   if (me.pos.y <= 0) { me.pos.y = 0; me.velY = 0; me.onGround = true; }
@@ -623,9 +715,10 @@ function updateWeapons(dt, t) {
   // pickup prompt
   if (near && isFighter() && !me.weapon && snap.phase === 'fight' && me.hp > 0) {
     const d = WEAPONS[near.type];
-    ui.prompt.innerHTML = `Press <b>E</b> to pick up <b style="color:${hex(d.color)}">${d.name}</b> · ${d.damage} dmg`;
+    ui.prompt.innerHTML = `${touch.active ? 'Tap <b>GRAB</b>' : 'Press <b>E</b>'} to pick up <b style="color:${hex(d.color)}">${d.name}</b> · ${d.damage} dmg`;
     ui.prompt.style.display = 'block';
-  } else ui.prompt.style.display = 'none';
+    buttons.btnGrab.classList.add('ready');
+  } else { ui.prompt.style.display = 'none'; buttons.btnGrab.classList.remove('ready'); }
 }
 
 function updatePads(dt, t) {
@@ -677,7 +770,7 @@ function updateHud() {
   } else {
     ui.wName.textContent = 'Bare hands';
     ui.wName.style.color = '#e8f6ff';
-    ui.wInfo.textContent = snap.phase === 'fight' && isFighter() ? 'Grab a weapon from the floor (E)' : 'Weapons drop when the fight starts';
+    ui.wInfo.textContent = snap.phase === 'fight' && isFighter() ? (touch.active ? 'Walk to a weapon and tap GRAB' : 'Grab a weapon from the floor (E)') : 'Weapons drop when the fight starts';
   }
   ui.pips.innerHTML = Array.from({ length: USES_PER_WEAPON }, (_, i) => `<div class="pip ${i < me.uses ? 'on' : ''}"></div>`).join('');
 
