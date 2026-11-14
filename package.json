@@ -1,0 +1,27 @@
+{
+  "name": "doubleplayer",
+  "version": "0.1.0",
+  "description": "Double Player - a 2 player 3D wireframe arena brawler",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fake0h/doubleplayer.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/fake0h/doubleplayer/issues"
+  },
+  "homepage": "https://github.com/fake0h/doubleplayer#readme",
+  "dependencies": {
+    "three": "^0.187.0",
+    "ws": "^8.23.0"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  }
+}
