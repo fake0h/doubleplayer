@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
 import { EMOTION_IDS, emotionById, CHEESE, CHEESE_SPOTS } from './shared/emotions.js';
 import { DISCO } from './shared/disco.js';
+import { HYDRA, hydraSpots, pvpSpots } from './shared/hydra.js';
 import {
   WEAPONS, USES_PER_WEAPON, MAX_HEALTH, ARENA, FALL_MS, randomWeaponType, HIT_TUNING,
   randomSpecialType, usesOf, wallBox, wallHeightAt, segmentHitsWalls, jumpPadPos, BOMBS,
@@ -188,8 +189,8 @@ function onPad(player, pad) {
 function padOccupants(padList = ARENA.pads) {
   return padList.map(pad => [...players.values()].filter(pl => onPad(pl, pad)).map(pl => pl.id));
 }
-const modePads = (mode) => (mode === 'cheese' ? ARENA.cheesePads : mode === 'disco' ? ARENA.nextPads : ARENA.pads);
-const asMode = (m) => (['pvp', 'cheese', 'disco'].includes(m) ? m : 'pvp');
+const modePads = (mode) => (mode === 'cheese' ? ARENA.cheesePads : mode === 'disco' ? ARENA.nextPads : mode === 'hydra' ? ARENA.hydraPads : ARENA.pads);
+const asMode = (m) => (['pvp', 'cheese', 'disco', 'hydra'].includes(m) ? m : 'pvp');
 
 // One player per pad, each player counted once. Returns the list of fighters (0-4).
 function padFighters(occ) {
@@ -250,6 +251,7 @@ function spawnWeapon(forceType) {
         || ARENA.cheesePads.some(p => Math.hypot(x - p.x, z - p.z) < 3)
         || ARENA.nextPads.some(p => Math.hypot(x - p.x, z - p.z) < 3)
         || ARENA.grayPads.some(p => Math.hypot(x - p.x, z - p.z) < 3)
+        || ARENA.hydraPads.some(p => Math.hypot(x - p.x, z - p.z) < 3)
         || insideAnyWall(x, z, 1.2));
   const specialsOut = [...weapons.values()].filter(w => WEAPONS[w.type].special).length;
   let type = forceType;
@@ -261,6 +263,7 @@ function spawnWeapon(forceType) {
 function resetToLobby() {
   game.phase = 'lobby';
   disco = null;
+  hydra = null;
   game.solo = false;
   game.mode = 'pvp';
   cheese = null;
@@ -307,7 +310,7 @@ function tickGame() {
   const t = now();
   if (game.phase === 'lobby') {
     // green pads start 4xPVP, yellow pads start Say Cheese
-    for (const mode of ['pvp', 'cheese', 'disco']) {
+    for (const mode of ['pvp', 'cheese', 'disco', 'hydra']) {
       const fighters = padFighters(padOccupants(modePads(mode)));
       if (fighters.length >= 2) {   // a lone Say Cheese player starts with the "Play now" button instead
         game.phase = 'countdown';
@@ -330,10 +333,12 @@ function tickGame() {
       game.fighters = [];
       announce('Countdown cancelled — at least 2 players must stay on the pads', 2500);
     } else if (t >= game.phaseEndsAt) {
-      if (game.mode === 'cheese') startCheese(); else if (game.mode === 'disco') startDisco(); else startFight();
+      if (game.mode === 'cheese') startCheese(); else if (game.mode === 'disco') startDisco(); else if (game.mode === 'hydra') startHydra(); else startFight();
     }
   } else if (game.phase === 'disco') {
     tickDisco(t);
+  } else if (game.phase === 'hydra') {
+    tickHydra(t);
   } else if (game.phase === 'cheese') {
     tickCheese(t);
   } else if (game.phase === 'fight') {
@@ -417,6 +422,186 @@ function endDisco(boom, reason) {
   game.phaseEndsAt = now() + 10000;
   broadcast({ t: 'over', mode: 'disco', boom, reason, name: boom ? 'EVERYONE' : (standings[0]?.[1] ?? 'Nobody'), standings });
   if (disco) disco.stage = 'done';
+}
+
+// ---------- Hydra Cubed ----------
+// Players stand in an arc and fight three monsters in a row with a shield (left hand) and a sword
+// (right hand), controlled by their camera (or keyboard). Monsters sway, cock a head back, then
+// strike one player: block / lean the right way, then hit back while the monster is open.
+// After the hydra, the survivors fight each other. Armor = health: helmet, arms, chest, then dead.
+let hydra = null;
+function hydraFighters() { return hydra ? hydra.players.filter(hp => players.has(hp.id)) : []; }
+function aliveHydra() { return hydraFighters().filter(hp => hp.alive); }
+function placeHydra(hp, spot) {
+  hp.spot = spot;
+  const pl = players.get(hp.id);
+  if (!pl) return;
+  pl.p = [spot.x, 0, spot.z];
+  pl.yaw = spot.yaw;
+  pl.lockUntil = Infinity;
+  pl.weapon = null;
+  send(pl.ws, { t: 'hydraStart', spot: [spot.x, spot.z], yaw: spot.yaw });
+}
+function startHydra() {
+  game.phase = 'hydra';
+  const t = now();
+  const spots = hydraSpots(game.fighters.length);
+  hydra = {
+    stage: 'calibrate', stageEndsAt: t + HYDRA.calibrateMs, monster: null, round: 0,
+    players: game.fighters.map(id => ({
+      id, name: players.get(id)?.name ?? '?', hits: 0, alive: true, ready: false,
+      shieldUntil: 0, shieldReadyAt: 0, swingReadyAt: 0, lastSwing: 0, lean: null,
+    })),
+  };
+  hydra.players.forEach((hp, i) => placeHydra(hp, spots[i]));
+  announce('🐍 HYDRA CUBED! Stand still for a moment so the camera can learn your position', 3500);
+}
+function spawnMonster(kind, t) {
+  const def = HYDRA.monsters[kind];
+  hydra.monster = {
+    kind, hp: def.hp, maxHp: def.hp, heads: def.heads.map(() => true),
+    state: 'rise', stateEndsAt: t + HYDRA.riseMs, target: null, head: 0, vulnerableUntil: 0, lastHead: 0,
+  };
+  broadcast({ t: 'hydraFx', kind: 'rise', monster: kind });
+  announce(`🐍 A ${def.name.toUpperCase()} rises!`, 2500);
+}
+function hydraHurt(hp, by) {
+  hp.hits++;
+  const pieces = ['helmet', 'arm armor', 'chest armor'];
+  if (hp.hits >= HYDRA.hitsToKill) {
+    hp.alive = false;
+    broadcast({ t: 'hydraFx', kind: 'dead', id: hp.id, by });
+    announce(`💀 ${hp.name} has fallen!`, 2500);
+  } else {
+    broadcast({ t: 'hydraFx', kind: 'hurt', id: hp.id, by, lost: pieces[hp.hits - 1] });
+  }
+}
+// does the target defend this strike? cobra: shield; twin: shield + lean away from the head;
+// hydra: lean away from left/right heads, lean back from the middle head
+function defends(hp, kind, headName, t) {
+  const shield = t < hp.shieldUntil;
+  const away = headName === 'left' ? 'right' : headName === 'right' ? 'left' : 'back';
+  if (kind === 'cobra') return shield;
+  if (kind === 'twin') return shield && hp.lean === away;
+  return hp.lean === away;
+}
+function tickHydra(t) {
+  if (!hydra) return;
+  const fighters = hydraFighters();
+  if (!fighters.length) return endHydra(null, 'Everyone left the battle');
+  if (hydra.stage === 'calibrate') {
+    if (fighters.every(hp => hp.ready) || t >= hydra.stageEndsAt) {
+      hydra.stage = 'monsters';
+      spawnMonster('cobra', t);
+    }
+    return;
+  }
+  const alive = aliveHydra();
+  if (!alive.length) return endHydra(null, 'The monsters won! Everyone fell in battle.');
+  if (hydra.stage === 'pvp') {
+    if (alive.length <= 1) return endHydra(alive[0]?.id ?? null, `${alive[0]?.name ?? 'Nobody'} is the last one standing!`);
+    return;
+  }
+  const m = hydra.monster;
+  if (!m) return;
+  const def = HYDRA.monsters[m.kind];
+  if (m.state === 'rise' && t >= m.stateEndsAt) { m.state = 'sway'; m.stateEndsAt = t + rand(...HYDRA.swayMs); }
+  else if (m.state === 'sway' && t >= m.stateEndsAt) {
+    // pick who to strike and which head
+    const target = alive[Math.floor(Math.random() * alive.length)];
+    const liveHeads = m.heads.map((h, i) => (h ? i : -1)).filter(i => i >= 0);
+    m.target = target.id;
+    m.head = liveHeads[Math.floor(Math.random() * liveHeads.length)];
+    m.state = 'windup';
+    m.stateEndsAt = t + HYDRA.windupMs[m.kind];
+    m.vulnerableUntil = 0;
+  } else if (m.state === 'windup' && t >= m.stateEndsAt) {
+    // STRIKE
+    const target = hydra.players.find(hp => hp.id === m.target);
+    const headName = def.heads[m.head];
+    const ok = target && target.alive && players.has(target.id) && defends(target, m.kind, headName, t);
+    m.state = 'strike';
+    m.stateEndsAt = t + HYDRA.vulnerableMs;
+    m.lastHead = m.head;
+    if (ok) {
+      m.vulnerableUntil = t + HYDRA.vulnerableMs;
+      broadcast({ t: 'hydraFx', kind: m.kind === 'hydra' ? 'dodge' : 'block', id: target.id, head: headName });
+    } else {
+      if (target && target.alive) hydraHurt(target, m.kind);
+      // the cobra can be hit right after any strike; the others only after a miss
+      if (m.kind === 'cobra') m.vulnerableUntil = t + HYDRA.vulnerableMs;
+      broadcast({ t: 'hydraFx', kind: 'struck', id: target?.id, head: headName });
+    }
+  } else if (m.state === 'strike' && t >= m.stateEndsAt) {
+    m.state = 'sway'; m.stateEndsAt = t + rand(...HYDRA.swayMs); m.target = null; m.vulnerableUntil = 0;
+  } else if (m.state === 'dead' && t >= m.stateEndsAt) {
+    const next = HYDRA.order[HYDRA.order.indexOf(m.kind) + 1];
+    if (next) spawnMonster(next, t);
+    else if (alive.length >= 2) {
+      // all three monsters down: survivors face each other
+      hydra.stage = 'pvp';
+      hydra.monster = null;
+      const spots = pvpSpots(alive.length);
+      alive.forEach((hp, i) => placeHydra(hp, spots[i]));
+      broadcast({ t: 'hydraFx', kind: 'pvp' });
+      announce('⚔️ The hydra is slain! Now fight each other — last one standing wins!', 3500);
+    } else return endHydra(alive[0].id, `${alive[0].name} slew the Hydra!`);
+  }
+}
+const rand = (a, b) => a + Math.random() * (b - a);
+function hydraShield(pl) {
+  const hp = hydra?.players.find(h => h.id === pl.id);
+  const t = now();
+  if (!hp || !hp.alive || hydra.stage === 'calibrate') return;
+  if (t < hp.shieldReadyAt) return;                    // still up, or cooling down
+  hp.shieldUntil = t + HYDRA.shieldUpMs;
+  hp.shieldReadyAt = t + HYDRA.shieldUpMs + HYDRA.shieldCooldownMs;
+}
+function hydraSwing(pl) {
+  const hp = hydra?.players.find(h => h.id === pl.id);
+  const t = now();
+  if (!hp || !hp.alive || hydra.stage === 'calibrate' || t < hp.swingReadyAt) return;
+  hp.swingReadyAt = t + HYDRA.swingCooldownMs;
+  hp.lastSwing = t;
+  if (hydra.stage === 'pvp') {
+    // hit the neighbor you lean toward, otherwise the nearest opponent
+    const others = aliveHydra().filter(o => o.id !== hp.id);
+    if (!others.length) return;
+    const me = hp.spot;
+    const fwd = [-Math.sin(me.yaw), -Math.cos(me.yaw)], right = [-fwd[1], fwd[0]];
+    let pick = others.sort((a, b) => Math.hypot(a.spot.x - me.x, a.spot.z - me.z) - Math.hypot(b.spot.x - me.x, b.spot.z - me.z))[0];
+    if (hp.lean === 'left' || hp.lean === 'right') {
+      const side = (o) => (o.spot.x - me.x) * right[0] + (o.spot.z - me.z) * right[1];
+      const want = others.filter(o => (hp.lean === 'right' ? side(o) > 0 : side(o) < 0));
+      if (want.length) pick = want[0];
+    }
+    if (t < pick.shieldUntil) { broadcast({ t: 'hydraFx', kind: 'pvpBlock', id: pick.id, by: hp.id }); return; }
+    broadcast({ t: 'hydraFx', kind: 'pvpHit', id: pick.id, by: hp.id });
+    hydraHurt(pick, hp.id);
+    return;
+  }
+  const m = hydra.monster;
+  if (!m || m.state === 'rise' || m.state === 'dead') return;
+  if (t < m.vulnerableUntil) {
+    m.vulnerableUntil = 0;
+    m.hp--;
+    if (m.kind === 'hydra') m.heads[m.lastHead] = false;      // chop off the head that attacked
+    broadcast({ t: 'hydraFx', kind: 'monsterHit', by: hp.id, head: m.lastHead, hp: m.hp });
+    if (m.hp <= 0) {
+      m.state = 'dead'; m.stateEndsAt = t + 1800;
+      announce(`⚔️ ${hp.name} slew the ${HYDRA.monsters[m.kind].name}!`, 2500);
+    }
+  } else {
+    broadcast({ t: 'hydraFx', kind: 'monsterDodge', by: hp.id });   // swung at the wrong time: it dodges
+  }
+}
+function endHydra(winnerId, reason) {
+  const w = hydra?.players.find(hp => hp.id === winnerId);
+  game.phase = 'over';
+  game.winner = winnerId;
+  game.phaseEndsAt = now() + 9000;
+  broadcast({ t: 'over', mode: 'hydra', winner: winnerId, name: w ? w.name : 'THE MONSTERS', reason });
+  if (hydra) hydra.stage = 'done';
 }
 
 // ---------- Say Cheese ----------
@@ -901,7 +1086,7 @@ wss.on('connection', (ws) => {
       case 'soloStart': {
         // alone on the yellow (Say Cheese) or blue (Dance Dance Disco) pads: play with everyone on this camera
         if (game.phase !== 'lobby') break;
-        const mode = msg.mode === 'disco' ? 'disco' : 'cheese';
+        const mode = ['disco', 'hydra'].includes(msg.mode) ? msg.mode : 'cheese';
         const mine = padFighters(padOccupants(modePads(mode)));
         if (mine.length === 1 && mine[0] === pl.id) {
           game.phase = 'countdown'; game.mode = mode; game.solo = true;
@@ -951,6 +1136,25 @@ wss.on('connection', (ws) => {
         if (game.mode === 'disco') { if (disco?.devices.includes(pl.id)) disco.ready.add(pl.id); break; }
         const cp = cheese?.players.find(c => c.id === pl.id);
         if (cp) { cp.ready = true; cp.camera = !!msg.camera; }
+        break;
+      }
+      case 'hydraReady': {
+        const hp = hydra?.players.find(h => h.id === pl.id);
+        if (hp) hp.ready = true;
+        break;
+      }
+      case 'hydraInput': {
+        const hp = hydra?.players.find(h => h.id === pl.id);
+        if (hp) hp.lean = ['left', 'right', 'back'].includes(msg.lean) ? msg.lean : null;
+        break;
+      }
+      case 'hydraShield': if (hydra) hydraShield(pl); break;
+      case 'hydraSwing': if (hydra) hydraSwing(pl); break;
+      case 'hydraDebugSkip': {
+        // testing only: jump straight to the end of the hydra
+        if (!process.env.DEBUG_SPAWN || !hydra || hydra.stage !== 'monsters') break;
+        const def = HYDRA.monsters.hydra;
+        hydra.monster = { kind: 'hydra', hp: 0, maxHp: def.hp, heads: def.heads.map(() => false), state: 'dead', stateEndsAt: now() + 500, target: null, head: 0, vulnerableUntil: 0, lastHead: 0 };
         break;
       }
       case 'dancePhoto': {
@@ -1078,6 +1282,16 @@ setInterval(() => {
     fighters: game.fighters,
     pads: padOccupants().map(o => o.length > 0),
     mode: game.mode,
+    hydra: hydra && game.phase !== 'lobby' ? {
+      stage: hydra.stage,
+      monster: hydra.monster ? {
+        kind: hydra.monster.kind, hp: hydra.monster.hp, maxHp: hydra.monster.maxHp, heads: hydra.monster.heads,
+        state: hydra.monster.state, left: Math.max(0, hydra.monster.stateEndsAt - t), target: hydra.monster.target,
+        head: hydra.monster.head, open: hydra.monster.vulnerableUntil > t,
+      } : null,
+      players: hydraFighters().map(hp => [hp.id, hp.hits, hp.alive ? 1 : 0, Math.max(0, hp.shieldUntil - t), Math.max(0, hp.shieldReadyAt - t),
+        Math.max(0, hp.swingReadyAt - t), hp.lean, t - hp.lastSwing < 400 ? 1 : 0, hp.ready ? 1 : 0, hp.name]),
+    } : null,
     disco: disco && game.phase !== 'lobby' ? {
       stage: disco.stage, hype: +disco.hype.toFixed(3), total: Math.round(disco.total || 0), goal: DISCO.goalPoints, left: Math.max(0, disco.stageEndsAt - t),
       elapsed: disco.danceStart ? t - disco.danceStart : 0, devices: discoDevices(),

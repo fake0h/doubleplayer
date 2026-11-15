@@ -188,6 +188,36 @@
   .rrow .nm img { width: 64px; height: 64px; border-radius: 10px; object-fit: cover; border: 3px solid #fff; vertical-align: middle; margin-right: 8px; }
   #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; z-index: 30; transition: opacity 0.6s ease-out; }
   /* ---------- invites ---------- */
+  #hydraHud { position: fixed; inset: 0; pointer-events: none; display: none; z-index: 6; }
+  #hydraTop { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); text-align: center; text-shadow: 0 0 10px #000, 0 2px 4px #000; }
+  #hydraName { font: 900 30px system-ui, sans-serif; color: #00ffc8; letter-spacing: 2px; display: inline; }
+  #hydraHp { font-size: 24px; letter-spacing: 4px; display: inline; margin-left: 12px; vertical-align: 3px; }
+  #hydraTip { margin-top: 6px; font: 700 17px system-ui, sans-serif; max-width: 46vw; color: #fff; background: rgba(0,0,0,0.45); padding: 6px 14px; border-radius: 10px; display: inline-block; }
+  #hydraTip.danger { color: #ff4a4a; animation: hpulse 0.35s infinite alternate; }
+  #hydraTip.go { color: #39ff14; animation: hpulse 0.25s infinite alternate; }
+  @keyframes hpulse { from { transform: scale(1); } to { transform: scale(1.08); } }
+  #hydraMe { position: absolute; left: 16px; bottom: 16px; width: 290px; padding: 10px 12px; }
+  #hydraArmor { font-size: 15px; margin-bottom: 6px; line-height: 1.5; }
+  #hydraArmor .gone { opacity: 0.3; text-decoration: line-through; }
+  .hrow { display: flex; align-items: center; gap: 8px; margin: 4px 0; font-size: 14px; font-weight: 700; }
+  .hrow span { width: 80px; }
+  .hbar { flex: 1; height: 10px; background: rgba(255,255,255,0.12); border-radius: 5px; overflow: hidden; }
+  .hbar div { height: 100%; width: 100%; background: #4fb8ff; transition: width 0.1s linear; }
+  #hydraLean { display: flex; justify-content: space-between; margin-top: 8px; font-size: 13px; font-weight: 800; }
+  #hydraLean span { padding: 3px 8px; border-radius: 6px; background: rgba(255,255,255,0.08); color: #9ab; }
+  #hydraLean span.on { background: #00ffc8; color: #002; }
+  #hydraKeys { margin-top: 6px; font-size: 11px; color: #9ab; }
+  #hydraCamBox { position: absolute; right: 16px; bottom: 16px; width: 256px; border: 3px solid #00ffc8; border-radius: 10px; overflow: hidden; background: #000; display: none; }
+  #hydraCamBox canvas { display: block; width: 100%; }
+  #hydraCamMsg { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6); color: #fff; font: 700 13px system-ui, sans-serif; padding: 4px 6px; text-align: center; }
+  #hydraBtns { position: absolute; right: 16px; bottom: 230px; display: none; gap: 8px; flex-wrap: wrap; width: 250px; justify-content: flex-end; pointer-events: auto; }
+  #hydraBtns button { width: 70px; height: 56px; font-size: 24px; border-radius: 12px; border: 2px solid #00ffc8; background: rgba(0,20,20,0.7); color: #fff; }
+  #hydraBtns button.big { width: 110px; height: 80px; font-size: 38px; }
+  #hydraAsk { position: fixed; inset: 0; z-index: 8; display: none; align-items: center; justify-content: center; background: rgba(0,0,0,0.55); }
+  #hydraAsk .box { max-width: 520px; text-align: center; padding: 22px; border: 2px solid #00ffc8; }
+  #hydraAsk h2 { color: #00ffc8; margin: 0 0 10px; font-size: 32px; }
+  #hydraAsk button { margin: 6px; padding: 12px 18px; font-size: 18px; border-radius: 10px; border: 2px solid #00ffc8; background: #032; color: #fff; cursor: pointer; }
+  #hydraAskMsg { margin-top: 8px; color: #ffd400; min-height: 1em; }
   #padPanel { position: fixed; left: 50%; top: 110px; transform: translateX(-50%); display: none; z-index: 7; text-align: center; pointer-events: auto; }
   #padPanel .title { font-weight: 800; margin-bottom: 8px; }
   #padPanel button, #inviteToast button { font: 800 16px system-ui, sans-serif; border: 0; border-radius: 8px; padding: 10px 16px; margin: 3px; cursor: pointer; touch-action: manipulation; }
@@ -312,6 +342,29 @@
 <div id="discoHud">
   <div id="discoTop"><div id="discoTitle">🪩 JUST DANCE! 🪩</div><div id="discoMeterLabel">PARTY METER</div><div id="discoMeter"><div></div></div><div id="discoHint"></div></div>
   <div id="danceTags"></div>
+</div>
+<div id="hydraHud">
+  <div id="hydraTop"><div><div id="hydraName"></div><div id="hydraHp"></div></div><div id="hydraTip"></div></div>
+  <div id="hydraMe" class="panel">
+    <div id="hydraArmor"></div>
+    <div class="hrow"><span>🛡️ Shield</span><div class="hbar"><div id="hydraShieldBar"></div></div></div>
+    <div class="hrow"><span>⚔️ Sword</span><div class="hbar"><div id="hydraSwordBar"></div></div></div>
+    <div id="hydraLean"><span data-l="left">◀ LEFT</span><span data-l="back">▼ BACK</span><span data-l="right">RIGHT ▶</span></div>
+    <div id="hydraKeys">F shield · Space/click sword · hold A / S / D to lean</div>
+  </div>
+  <div id="hydraCamBox"><canvas id="hydraCanvas" width="256" height="192"></canvas><div id="hydraCamMsg"></div></div>
+  <div id="hydraBtns">
+    <button data-act="left">◀</button><button data-act="back">▼</button><button data-act="right">▶</button>
+    <button data-act="shield" class="big">🛡️</button><button data-act="swing" class="big">⚔️</button>
+  </div>
+</div>
+<div id="hydraAsk">
+  <div class="box panel">
+    <h2>🐍 HYDRA CUBED</h2>
+    <p>Fight the monsters with your body! <b>Raise your left hand</b> for your shield, <b>swing your right arm</b> for your sword, and <b>lean</b> left, right or back to dodge.<br><small>Your video stays on your device.</small></p>
+    <div class="btns"><button id="hydraCamYes">📷 Use my camera</button><button id="hydraCamNo">⌨️ Play with keys / buttons</button></div>
+    <div id="hydraAskMsg"></div>
+  </div>
 </div>
 <div id="flash"></div>
 <div id="padPanel" class="panel">

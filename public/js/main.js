@@ -6,6 +6,8 @@ import { Smiley } from './smiley.js';
 import { FaceScorer } from './cheese.js';
 import { MotionMeter, DiscoMusic, PoseTracker, BONES } from './dance.js';
 import { DISCO } from '/shared/disco.js';
+import { HYDRA } from '/shared/hydra.js';
+import { Monster, equipHydra, unequipHydra, poseHydra, HydraControl } from './hydra.js';
 import { emotionById, CHEESE, CHEESE_SPOTS } from '/shared/emotions.js';
 
 // ---------- renderer / scene ----------
@@ -167,7 +169,7 @@ const jumpPadMeshes = ARENA.jumpPads.map((jp) => {
   return { g, top, chevrons, light, flash: 0 };
 });
 function updateJumpPads(dt, t) {
-  const hide = (snap.mode === 'cheese' || snap.mode === 'disco') && (snap.phase === 'cheese' || snap.phase === 'disco' || snap.phase === 'over');
+  const hide = (snap.mode === 'cheese' || snap.mode === 'disco' || snap.mode === 'hydra') && (snap.phase === 'cheese' || snap.phase === 'disco' || snap.phase === 'hydra' || snap.phase === 'over');
   for (const jp of jumpPadMeshes) jp.g.visible = !hide;
   if (snap.jumpPads) snap.jumpPads.forEach(([x, z], i) => {
     const jp = jumpPadMeshes[i];
@@ -468,6 +470,10 @@ const pads = ARENA.pads.map((p) => makePad(p, PVP_GREEN));                  // 4
 const cheesePads = ARENA.cheesePads.map((p) => makePad(p, CHEESE_YELLOW));  // Say Cheese corner (northeast)
 const NEXT_BLUE = 0x2a8cff, GRAY = 0x5a5f6b;
 const nextPads = ARENA.nextPads.map((p) => makePad(p, NEXT_BLUE));          // next game: middle of the east wall
+const HYDRA_RED = 0xff2a6a;
+const hydraPads = ARENA.hydraPads.map((p) => makePad(p, HYDRA_RED));        // Hydra Cubed: southeast corner
+const hydraFloor = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), new THREE.MeshBasicMaterial({ color: HYDRA_RED, transparent: true, opacity: 0.06, depthWrite: false }));
+hydraFloor.rotation.x = -Math.PI / 2; hydraFloor.position.set(21, 0.015, 21); scene.add(hydraFloor);
 const grayPads = ARENA.grayPads.map((p) => makePad(p, GRAY));               // unused for now
 for (const g of grayPads) { g.plateMat.emissiveIntensity = 0.05; g.ring.material.color.setHex(0x3a3f4a); }
 const nextFloor = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), new THREE.MeshBasicMaterial({ color: NEXT_BLUE, transparent: true, opacity: 0.06, depthWrite: false }));
@@ -528,6 +534,39 @@ const discoSign = wallSign((x, W, Hc) => {
   x.shadowBlur = 0; x.fillStyle = '#d8ecff'; x.font = 'bold 40px sans-serif';
   x.fillText('Dance with your camera until the floor explodes · blue pads', W / 2, Hc * 0.9, W - 80);
 }, 11, 6.2, new THREE.Vector3(HALF - 0.1, 6, 0), -Math.PI / 2);
+// Hydra Cubed: a 2D three-headed hydra on the east wall above the crimson pads
+const hydraSign = wallSign((x, W, Hc) => {
+  const col = '#ff2a6a', teal = '#00ffc8';
+  x.fillStyle = 'rgba(18,0,8,0.88)'; x.fillRect(0, 0, W, Hc);
+  x.strokeStyle = col; x.lineWidth = 16; x.shadowColor = col; x.shadowBlur = 30; x.strokeRect(20, 20, W - 40, Hc - 40);
+  x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.fillStyle = col; x.font = '900 112px sans-serif'; x.fillText('HYDRA CUBED', W / 2, Hc * 0.13, W - 80);
+  // the beast
+  x.strokeStyle = teal; x.shadowColor = teal; x.shadowBlur = 22; x.lineWidth = 12; x.lineCap = 'round'; x.lineJoin = 'round';
+  const bx = W / 2, by = Hc * 0.66;
+  x.beginPath(); x.ellipse(bx, by, W * 0.17, Hc * 0.1, 0, 0, Math.PI * 2); x.stroke();
+  for (const [lx, d] of [[-0.12, -1], [-0.05, 1], [0.05, -1], [0.12, 1]]) {
+    x.beginPath(); x.moveTo(bx + lx * W, by + Hc * 0.07); x.lineTo(bx + lx * W + d * 10, by + Hc * 0.17); x.lineTo(bx + lx * W + d * 34, by + Hc * 0.17); x.stroke();
+  }
+  x.beginPath(); x.moveTo(bx + W * 0.16, by); x.quadraticCurveTo(bx + W * 0.3, by - Hc * 0.02, bx + W * 0.34, by + Hc * 0.12); x.stroke();
+  [[-1, 0], [0, -0.07], [1, 0]].forEach(([i, up]) => {
+    const sx = bx + i * W * 0.07, sy = by - Hc * 0.07;
+    const hx = bx + i * W * 0.25, hy = by - Hc * (0.36 - up);
+    x.lineWidth = 16;
+    x.beginPath(); x.moveTo(sx, sy); x.bezierCurveTo(sx + i * W * 0.02, sy - Hc * 0.2, hx - i * W * 0.1, hy + Hc * 0.08, hx, hy); x.stroke();
+    // head facing outward, mouth open
+    const f = i === 0 ? 1 : i;
+    x.lineWidth = 10;
+    x.beginPath(); x.moveTo(hx, hy); x.lineTo(hx + f * 70, hy - 18); x.lineTo(hx + f * 88, hy + 4); x.stroke();
+    x.beginPath(); x.moveTo(hx, hy + 6); x.lineTo(hx + f * 80, hy + 26); x.stroke();
+    x.fillStyle = '#ffe000'; x.beginPath(); x.arc(hx + f * 40, hy - 14, 9, 0, Math.PI * 2); x.fill();
+    x.strokeStyle = col; x.lineWidth = 5;
+    x.beginPath(); x.moveTo(hx + f * 88, hy + 10); x.lineTo(hx + f * 116, hy + 6); x.moveTo(hx + f * 104, hy + 8); x.lineTo(hx + f * 116, hy + 20); x.stroke();
+    x.strokeStyle = teal;
+  });
+  x.shadowBlur = 0; x.fillStyle = '#ffd6e4'; x.font = 'bold 40px sans-serif';
+  x.fillText('Camera battle · shield, sword, dodge · crimson pads', W / 2, Hc * 0.92, W - 80);
+}, 11, 7.5, new THREE.Vector3(HALF - 0.1, 6.5, 21), -Math.PI / 2);
 const cheeseFloor = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), new THREE.MeshBasicMaterial({ color: CHEESE_YELLOW, transparent: true, opacity: 0.06, depthWrite: false }));
 cheeseFloor.rotation.x = -Math.PI / 2; cheeseFloor.position.set(21, 0.015, -21); scene.add(cheeseFloor);
 
@@ -855,6 +894,7 @@ function connect() {
       case 'countdown': {
         const names = m.fighters.map(id => avatars.get(id)?.data.name ?? '?');
         if (m.mode === 'disco') { banner(`🪩 DANCE DANCE DISCO: ${names.join(', ')}\nOthers: hop on a free blue pad to join!`, 3000); break; }
+        if (m.mode === 'hydra') { banner(`🐍 HYDRA CUBED: ${names.join(', ')}\nOthers: hop on a free crimson pad to join!`, 3000); break; }
         banner(m.mode === 'cheese' ? `🧀 SAY CHEESE: ${names.join(', ')}\nOthers: hop on a free yellow pad to join!` : `${names.join(' vs ')}\nOthers: jump on a free pad to join!`, 3000);
         break;
       }
@@ -874,6 +914,12 @@ function connect() {
         const streakLine = m.streak >= 2 ? `\n${m.streak} wins in a row!` : '';
         const muscleLine = lvl >= 5 ? ' MAX MUSCLE — GLOWING!' : lvl > 0 ? ` Muscle level ${lvl}` : '';
         if (m.mode === 'disco') { showDiscoResults(m); banner(m.boom ? '💥 THE DANCE FLOOR EXPLODED — EVERYBODY WINS! 💥' : '🪩 The music stopped!', 5500); break; }
+        if (m.mode === 'hydra') {
+          banner(m.winner ? `🐍 ${m.name} WINS HYDRA CUBED! 🐍\n${m.reason}` : `🐍 ${m.reason}`, 5500);
+          feed(m.reason, '#ffd23c');
+          tone(m.winner === me.id ? 660 : 200, 0.6, 'triangle', 0.15, m.winner === me.id ? 400 : -100);
+          break;
+        }
         if (m.mode === 'cheese') showCheeseResults(m);
         banner(m.mode === 'cheese' ? `🧀 ${m.name} WINS SAY CHEESE! 🧀` : `${m.name} WINS!\n${m.reason}${streakLine}${muscleLine ? `\n💪${muscleLine}` : ''}`, 5500);
         if (lvl > 0) feed(`${m.name} bulked up to muscle level ${lvl}${lvl >= 5 ? ' (MAX — glowing!)' : ''}`, '#ffd23c');
@@ -910,6 +956,8 @@ function connect() {
       case 'bombs': onBombs(m); break;
       case 'admin': onAdminResult(m); break;
       case 'cheeseStart': onCheeseStart(m); hideInvite(); break;
+      case 'hydraStart': onHydraStart(m); hideInvite(); break;
+      case 'hydraFx': onHydraFx(m); break;
       case 'invite': onInvite(m); break;
       case 'cheeseCount': onCheeseCount(m); break;
       case 'discoGo': onDiscoGo(); break;
@@ -1545,6 +1593,301 @@ function updateVirtualAvatars(dt) {
   }
 }
 
+// ---------- Hydra Cubed client ----------
+const hydraCtl = new HydraControl();
+const hydraEl = { hud: $('hydraHud'), name: $('hydraName'), hp: $('hydraHp'), tip: $('hydraTip'), me: $('hydraMe'), armor: $('hydraArmor'),
+  shield: $('hydraShieldBar'), sword: $('hydraSwordBar'), lean: $('hydraLean'), camBox: $('hydraCamBox'), canvas: $('hydraCanvas'),
+  camMsg: $('hydraCamMsg'), btns: $('hydraBtns'), ask: $('hydraAsk'), askMsg: $('hydraAskMsg') };
+let monster = null, corpse = null, hydraCamInit = false;
+let hydraStateKey = '', hydraStateAt = 0, hydraStateLen = 1;
+const hydraLocal = { started: false, ready: false, lean: null, keyLean: null, btnLean: null, sentLean: undefined, sentAt: 0, shieldAt: -1e9, swingAt: -1e9, swinging: {} };
+function hydraOn() { return snap.mode === 'hydra' && !!snap.hydra && (snap.phase === 'hydra' || snap.phase === 'over'); }
+function hydraPlayer(id) { return snap.hydra?.players.find(p => p[0] === id); }
+function hydraMe() { return hydraOn() ? hydraPlayer(me.id) : null; }
+function inHydraGame() { return !!hydraMe(); }
+function hydraDead(id) { const p = hydraOn() ? hydraPlayer(id) : null; return !!p && !p[2]; }
+const AWAY = { left: 'RIGHT', right: 'LEFT', middle: 'BACK' };
+
+function onHydraStart(m) {
+  me.hydraSpot = { x: m.spot[0], z: m.spot[1], yaw: m.yaw };
+  if (hydraLocal.started) return;            // second time = the survivors' circle after the hydra
+  hydraLocal.started = true; hydraLocal.ready = false; hydraCamInit = false;
+  hydraLocal.shieldAt = hydraLocal.swingAt = -1e9;
+  document.exitPointerLock?.();
+  if (hydraCtl.fake) { useHydraCamera(); return; }
+  hydraEl.askMsg.textContent = '';
+  hydraEl.ask.style.display = 'flex';
+}
+async function useHydraCamera() {
+  hydraEl.askMsg.textContent = 'Starting your camera…';
+  const ok = await hydraCtl.start(scorer.video);
+  if (!ok) {
+    hydraEl.askMsg.textContent = hydraCtl.status === 'nocam'
+      ? 'No camera access — check your browser settings, or play with keys / buttons.'
+      : 'Body tracking could not load on this device — play with keys / buttons.';
+    if (hydraCtl.status === 'error') hydraCtl.stop();
+    return;
+  }
+  hydraEl.ask.style.display = 'none';
+}
+function hydraReady() { if (!hydraLocal.ready) { hydraLocal.ready = true; send({ t: 'hydraReady' }); } }
+function hydraKeysOnly() { hydraEl.ask.style.display = 'none'; hydraCtl.stop(); hydraReady(); }
+$('hydraCamYes').addEventListener('click', (e) => { e.stopPropagation(); useHydraCamera(); });
+$('hydraCamNo').addEventListener('click', (e) => { e.stopPropagation(); hydraKeysOnly(); });
+
+function hydraCanAct() { const p = hydraMe(); return p && p[2] && snap.phase === 'hydra' && snap.hydra.stage !== 'calibrate' ? p : null; }
+function hydraShield() {
+  const p = hydraCanAct(), now = performance.now();
+  if (!p || now < hydraLocal.shieldAt + HYDRA.shieldUpMs + HYDRA.shieldCooldownMs || p[4] > 100) return;   // still up or cooling down
+  hydraLocal.shieldAt = now;
+  send({ t: 'hydraShield' });
+  tone(260, 0.12, 'triangle', 0.07, 220);
+}
+function hydraSwing() {
+  const p = hydraCanAct(), now = performance.now();
+  if (!p || now < hydraLocal.swingAt + HYDRA.swingCooldownMs || p[5] > 100) return;
+  hydraLocal.swingAt = now;
+  send({ t: 'hydraSwing' });
+  avatars.get(me.id)?.body.swing('melee');
+  noise(0.15, 0.06);
+}
+// lean from keys / buttons / camera; sent right away so the server knows before the strike lands
+let hydraCamLean = null;
+function pushLean() {
+  const p = hydraMe();
+  hydraLocal.lean = p && p[2] ? (hydraLocal.keyLean || hydraLocal.btnLean || hydraCamLean || null) : null;
+  if (hydraLocal.lean !== hydraLocal.sentLean || performance.now() - hydraLocal.sentAt > 500) {
+    hydraLocal.sentLean = hydraLocal.lean; hydraLocal.sentAt = performance.now();
+    send({ t: 'hydraInput', lean: hydraLocal.lean });
+  }
+}
+// keyboard: F shield, Space / click sword, hold A / S / D (or arrows) to lean
+const LEAN_KEYS = { KeyA: 'left', ArrowLeft: 'left', KeyD: 'right', ArrowRight: 'right', KeyS: 'back', ArrowDown: 'back' };
+addEventListener('keydown', (e) => {
+  if (!inHydraGame() || e.target.tagName === 'INPUT') return;
+  if (e.code === 'KeyF') { if (!e.repeat) hydraShield(); }
+  else if (e.code === 'Space') { e.preventDefault(); if (!e.repeat) hydraSwing(); }
+  else if (LEAN_KEYS[e.code]) { hydraLocal.keyLean = LEAN_KEYS[e.code]; pushLean(); }
+  else return;
+  e.stopPropagation();
+}, true);
+addEventListener('keyup', (e) => {
+  if (LEAN_KEYS[e.code] && hydraLocal.keyLean === LEAN_KEYS[e.code]) { hydraLocal.keyLean = null; pushLean(); }
+}, true);
+addEventListener('click', (e) => {
+  if (!inHydraGame() || e.target !== renderer.domElement) return;
+  hydraSwing();
+  e.stopPropagation();
+}, true);
+hydraEl.btns.querySelectorAll('button').forEach(b => {
+  const act = b.dataset.act;
+  b.addEventListener('pointerdown', (e) => {
+    e.stopPropagation(); e.preventDefault();
+    if (act === 'shield') hydraShield(); else if (act === 'swing') hydraSwing(); else { hydraLocal.btnLean = act; pushLean(); }
+  });
+  const up = () => { if (hydraLocal.btnLean === act) { hydraLocal.btnLean = null; pushLean(); } };
+  b.addEventListener('pointerup', up); b.addEventListener('pointerleave', up); b.addEventListener('pointercancel', up);
+  b.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+});
+
+// dress and pose a player's wireframe body (armor, shield, sword, leaning)
+function hydraPoseBody(id, body, dt) {
+  const p = hydraOn() ? hydraPlayer(id) : null;
+  if (!p) { if (body.hydraGear) unequipHydra(body); return; }
+  const gear = equipHydra(body);
+  if (body.held !== gear.sword) body.setWeapon(gear.sword, 'melee');
+  const mine = id === me.id;
+  const shieldUp = p[3] > 0 || (mine && p[2] && performance.now() - hydraLocal.shieldAt < 250);
+  // other players' sword swings
+  if (!mine) {
+    if (p[7] && !hydraLocal.swinging[id]) body.swing('melee');
+    hydraLocal.swinging[id] = !!p[7];
+  }
+  poseHydra(body, dt, { hits: p[1], shieldUp, cooling: !shieldUp && p[4] > 0, lean: mine ? hydraLocal.lean : p[6] });
+}
+
+function hydraWorldPos(id) {
+  const a = avatars.get(id);
+  return a ? a.body.root.position.clone().add(new THREE.Vector3(0, 1.4, 0)) : null;
+}
+function onHydraFx(m) {
+  const mine = m.id === me.id;
+  const head = () => {
+    const n = monster?.necks[m.head ?? 0] || monster?.necks.find(q => q.alive);
+    return n ? n.head.g.getWorldPosition(new THREE.Vector3()) : new THREE.Vector3(HYDRA.monsterPos.x, 3, HYDRA.monsterPos.z);
+  };
+  switch (m.kind) {
+    case 'rise':
+      noise(1.2, 0.12); tone(70, 1.4, 'sawtooth', 0.12, 40);
+      break;
+    case 'hurt':
+    case 'dead': {
+      avatars.get(m.id)?.body.flash();
+      const pos = hydraWorldPos(m.id);
+      if (pos) addBurst(pos, 0xff2a2a, 14, 4, 0.035, 0.5);
+      tone(150, 0.3, 'sawtooth', 0.12, -60);
+      if (mine) {
+        shake = 0.45;
+        ui.vignette.style.boxShadow = 'inset 0 0 220px rgba(255,0,0,0.85)';
+        setTimeout(() => { ui.vignette.style.boxShadow = 'inset 0 0 160px rgba(255,0,0,0)'; }, 260);
+        banner(m.kind === 'dead' ? '💀 You fell in battle!\nWatch the others' : `💥 OUCH! You lost your ${m.lost}!`, 2000);
+      }
+      break;
+    }
+    case 'block': {
+      const pos = hydraWorldPos(m.id);
+      if (pos) addBurst(pos, 0xbfe6ff, 16, 5, 0.035, 0.4);
+      tone(1400, 0.12, 'square', 0.08, -600); tone(900, 0.2, 'triangle', 0.06);
+      if (mine) feed('🛡️ Blocked! Now hit it!', '#4fb8ff');
+      break;
+    }
+    case 'dodge':
+      tone(500, 0.15, 'triangle', 0.06, 300);
+      if (mine) feed('💨 Dodged! Now hit it!', '#00ffc8');
+      break;
+    case 'monsterHit': {
+      monster?.hit();
+      addBurst(head(), 0x39ff14, 24, 7, 0.07, 0.7);
+      if (monster?.kind === 'hydra') monster.chop(m.head);
+      tone(220, 0.25, 'square', 0.12, -120); noise(0.25, 0.12);
+      if (m.by === me.id) feed(monster?.kind === 'hydra' ? '⚔️ You chopped off a head!' : '⚔️ HIT!', '#39ff14');
+      break;
+    }
+    case 'monsterDodge':
+      monster?.dodge();
+      if (m.by === me.id) feed('It dodged! Hit it right after it strikes and misses.', '#ffd400');
+      break;
+    case 'pvpHit': case 'pvpBlock': {
+      const pos = hydraWorldPos(m.id);
+      if (pos) addBurst(pos, m.kind === 'pvpHit' ? 0xff2a2a : 0xbfe6ff, 14, 4, 0.035, 0.4);
+      tone(m.kind === 'pvpHit' ? 180 : 1300, 0.15, 'square', 0.08);
+      if (m.kind === 'pvpBlock' && mine) feed('🛡️ Blocked!', '#4fb8ff');
+      break;
+    }
+    case 'pvp':
+      banner('⚔️ THE HYDRA IS SLAIN!\nNow fight each other — last one standing wins!', 3500);
+      [440, 660, 880].forEach((f, i) => setTimeout(() => tone(f, 0.15, 'square', 0.08), i * 120));
+      break;
+  }
+}
+
+function hydraTip(Hs, mine) {
+  const M = Hs.monster;
+  if (Hs.stage === 'calibrate') return [hydraLocal.ready ? 'Waiting for the other players…' : hydraCtl.active ? 'Stand still and face your camera — learning where you are…' : 'Choose camera or keys to begin', ''];
+  if (mine && !mine[2]) return ['💀 You fell — cheer on the others!', ''];
+  if (Hs.stage === 'pvp') return [`${Hs.players.filter(p => p[2]).map(p => p[9]).join(' vs ')} — swing at a rival! Lean toward the one you want to hit · shield up to block`, ''];
+  if (!M) return ['', ''];
+  const def = HYDRA.monsters[M.kind];
+  if (M.state === 'rise') return [`🐍 The ${def.name} rises!`, 'danger'];
+  if (M.state === 'dead') return [`⚔️ The ${def.name} is slain!`, 'go'];
+  if (M.state === 'strike' && M.open) return ['⚔️ IT MISSED — STRIKE NOW!', 'go'];
+  if (M.state === 'windup') {
+    const headName = def.heads[M.head];
+    if (M.target !== me.id) return [`⚠️ It's going for ${hydraPlayer(M.target)?.[9] ?? 'someone'}!`, ''];
+    if (M.kind === 'cobra') return ['🛡️ SHIELD UP!', 'danger'];
+    if (M.kind === 'twin') {
+      const k = (performance.now() - hydraStateAt) / hydraStateLen;
+      return k > 0.55 ? [`🛡️ SHIELD UP + LEAN ${AWAY[headName]}!`, 'danger'] : ['⚠️ Which head?! Get ready…', 'danger'];
+    }
+    return [`💨 LEAN ${AWAY[headName]}!`, 'danger'];
+  }
+  if (M.kind === 'cobra') return ['Watch it sway… raise your shield when it strikes, then hit it', ''];
+  if (M.kind === 'twin') return ['Shield up AND lean away from the head that strikes · hit it after it misses', ''];
+  return ['Lean away from the left & right heads, lean BACK from the middle one · chop the head that misses', ''];
+}
+
+function updateHydra(dt, t) {
+  const on = hydraOn();
+  if (!on) {
+    hydraEl.hud.style.display = 'none';
+    hydraEl.ask.style.display = 'none';
+    if (monster) { monster.dispose(); monster = null; }
+    if (corpse) { corpse.dispose(); corpse = null; }
+    me.hydraSpot = null;
+    hydraLocal.started = false; hydraLocal.lean = null; hydraLocal.keyLean = hydraLocal.btnLean = null;
+    if (hydraCtl.status !== 'off') hydraCtl.stop();
+    return;
+  }
+  const Hs = snap.hydra, M = Hs.monster, now = performance.now();
+  // the monster (a new kind rises from the corpse of the last one)
+  if (M && (!monster || monster.kind !== M.kind)) {
+    if (corpse) corpse.dispose();
+    corpse = monster; if (corpse) corpse.fade = 0;
+    monster = new Monster(M.kind);
+    monster.g.position.set(HYDRA.monsterPos.x, -5, HYDRA.monsterPos.z);
+    scene.add(monster.g);
+  }
+  if (!M && monster) { if (corpse) corpse.dispose(); corpse = monster; corpse.fade = 0; monster = null; }
+  if (monster && M) {
+    const key = `${M.kind}:${M.state}:${M.target}:${M.head}`;
+    if (key !== hydraStateKey) { hydraStateKey = key; hydraStateAt = now; hydraStateLen = Math.max(200, M.left + 50); }
+    const k = (now - hydraStateAt) / hydraStateLen;
+    const targetPos = M.target != null ? hydraWorldPos(M.target) : null;
+    let faceYaw;
+    if (targetPos && (M.state === 'windup' || M.state === 'strike')) faceYaw = Math.atan2(targetPos.x - HYDRA.monsterPos.x, targetPos.z - HYDRA.monsterPos.z);
+    else {
+      // face the middle of the players
+      let cx = 0, cz = 0, n = 0;
+      for (const p of Hs.players) { const a = avatars.get(p[0]); if (a) { cx += a.body.root.position.x; cz += a.body.root.position.z; n++; } }
+      faceYaw = n ? Math.atan2(cx / n - HYDRA.monsterPos.x, cz / n - HYDRA.monsterPos.z) : 0;
+    }
+    M.heads.forEach((alive, i) => { if (!alive && monster.necks[i]?.alive) monster.chop(i); });
+    monster.update(dt, t, { state: M.state, k, head: M.head, open: M.open, targetPos, faceYaw });
+  }
+  if (corpse) {
+    corpse.fade += dt / (HYDRA.riseMs / 1000);
+    corpse.update(dt, t, { state: 'dead', k: 1, head: -1, open: false, targetPos: null, faceYaw: corpse.yaw });
+    corpse.setOpacity(Math.max(0, 1 - corpse.fade));
+    corpse.g.position.y = -corpse.fade * 2;
+    if (corpse.fade >= 1) { corpse.dispose(); corpse = null; }
+  }
+
+  // HUD
+  const mine = hydraMe();
+  hydraEl.hud.style.display = 'block';
+  hydraEl.me.style.display = mine ? 'block' : 'none';
+  if (M) {
+    const def = HYDRA.monsters[M.kind];
+    hydraEl.name.textContent = `${M.kind === 'hydra' ? '🐉' : '🐍'} ${def.name.toUpperCase()}`;
+    hydraEl.name.style.color = hex(def.color);
+    hydraEl.hp.textContent = M.kind === 'hydra' ? M.heads.map(h => (h ? '🐍' : '✖️')).join(' ') : '❤️'.repeat(Math.max(0, M.hp)) + '🖤'.repeat(Math.max(0, M.maxHp - M.hp));
+  } else {
+    hydraEl.name.textContent = Hs.stage === 'pvp' ? '⚔️ LAST ONE STANDING' : Hs.stage === 'calibrate' ? '🐍 HYDRA CUBED' : '';
+    hydraEl.name.style.color = Hs.stage === 'pvp' ? '#ff2a6a' : '#00ffc8';
+    hydraEl.hp.textContent = '';
+  }
+  const [tip, cls] = hydraTip(Hs, mine);
+  hydraEl.tip.textContent = tip;
+  hydraEl.tip.className = cls;
+  hydraEl.tip.style.display = tip ? 'inline-block' : 'none';
+
+  if (!mine) { hydraEl.camBox.style.display = 'none'; hydraEl.btns.style.display = 'none'; return; }
+  // camera controls
+  const c = hydraCtl.update(dt);
+  if (c.calibrated) { hydraReady(); feed('📷 Got you! Raise your left hand = shield · swing your right arm = sword · lean to dodge', '#00ffc8'); }
+  if (c.shield) hydraShield();
+  if (c.swing) hydraSwing();
+  hydraCamLean = c.lean;
+  pushLean();
+  hydraEl.camBox.style.display = hydraCtl.active ? 'block' : 'none';
+  if (hydraCtl.active) {
+    hydraCtl.draw(hydraEl.canvas);
+    hydraEl.camMsg.textContent = !hydraCtl.points ? 'Step back so the camera sees your upper body'
+      : hydraCtl.status === 'calibrating' ? 'Stand still… learning your position'
+      : hydraLocal.lean ? `Leaning ${hydraLocal.lean.toUpperCase()}` : 'Tracking you ✓';
+  }
+  hydraEl.btns.style.display = touch.active ? 'flex' : 'none';
+  // armor, shield and sword
+  const pieces = ['⛑️ Helmet', '🦾 Arm armor', '🛡️ Chest armor', '❤️ Life'];
+  hydraEl.armor.innerHTML = `<b style="color:#ff4a4a">ARMOR</b><br>` + pieces.map((n, i) => `<span class="${mine[1] > i ? 'gone' : ''}">${n}</span>`).join(' · ');
+  const shieldUp = mine[3] > 0;
+  hydraEl.shield.style.width = `${shieldUp ? mine[3] / HYDRA.shieldUpMs * 100 : mine[4] > 0 ? (1 - mine[4] / HYDRA.shieldCooldownMs) * 100 : 100}%`;
+  hydraEl.shield.style.background = shieldUp ? '#4fb8ff' : mine[4] > 0 ? '#556' : '#39ff14';
+  hydraEl.sword.style.width = `${(1 - mine[5] / HYDRA.swingCooldownMs) * 100}%`;
+  hydraEl.sword.style.background = mine[5] > 0 ? '#556' : '#ffc23c';
+  hydraEl.lean.querySelectorAll('span').forEach(sp => sp.classList.toggle('on', sp.dataset.l === hydraLocal.lean));
+}
+
 // ---------- Dance Dance Disco client ----------
 const meter = new MotionMeter();
 const pose = new PoseTracker();
@@ -1806,7 +2149,7 @@ function padsPressedBy(list) {
 function updatePadPanel() {
   aloneMode = null;
   if (snap.phase === 'lobby' && started) {
-    for (const [mode, list] of [['pvp', ARENA.pads], ['cheese', ARENA.cheesePads], ['disco', ARENA.nextPads]]) {
+    for (const [mode, list] of [['pvp', ARENA.pads], ['cheese', ARENA.cheesePads], ['disco', ARENA.nextPads], ['hydra', ARENA.hydraPads]]) {
       const on = [...new Set(padsPressedBy(list).flat())];
       if (on.length === 1 && on[0] === me.id) aloneMode = mode;
     }
@@ -1815,8 +2158,11 @@ function updatePadPanel() {
   if (!aloneMode) return;
   $('padTitle').textContent = aloneMode === 'cheese' ? '🧀 Say Cheese — invite friends, or play now with everyone on your camera'
     : aloneMode === 'disco' ? '🪩 Dance Dance Disco — invite friends, or dance now with everyone on your camera'
+    : aloneMode === 'hydra' ? '🐍 Hydra Cubed — invite friends, or fight the monsters alone'
     : '⚔️ 4xPVP needs at least 2 players — invite someone!';
   $('btnSolo').style.display = aloneMode === 'pvp' ? 'none' : '';
+  const soloLabel = aloneMode === 'hydra' ? '▶ Fight the monsters alone<kbd>P</kbd>' : '▶ Play now (everyone on this camera)<kbd>P</kbd>';
+  if ($('btnSolo').innerHTML !== soloLabel) $('btnSolo').innerHTML = soloLabel;
 }
 function sendInvite() { if (aloneMode) { send({ t: 'invite', mode: aloneMode }); tone(880, 0.1, 'triangle', 0.07); } }
 async function copyLink() {
@@ -1826,7 +2172,7 @@ async function copyLink() {
     else { await navigator.clipboard.writeText(url); feed('🔗 Link copied — paste it to a friend!', '#00e5ff'); }
   } catch { feed(`🔗 Share this link: ${url}`, '#00e5ff'); }
 }
-function playSolo() { if (aloneMode === 'cheese' || aloneMode === 'disco') send({ t: 'soloStart', mode: aloneMode }); }
+function playSolo() { if (aloneMode === 'cheese' || aloneMode === 'disco' || aloneMode === 'hydra') send({ t: 'soloStart', mode: aloneMode }); }
 function acceptInvite() {
   if (!pendingInvite) return;
   send({ t: 'acceptInvite', mode: pendingInvite.mode });
@@ -1835,7 +2181,7 @@ function acceptInvite() {
 function hideInvite() { pendingInvite = null; inviteToast.style.display = 'none'; clearTimeout(inviteTimer); }
 function onInvite(m) {
   pendingInvite = m;
-  $('inviteMsg').textContent = `📣 ${m.name} wants to play ${m.mode === 'cheese' ? '🧀 Say Cheese' : m.mode === 'disco' ? '🪩 Dance Dance Disco' : '⚔️ 4xPVP'}!`;
+  $('inviteMsg').textContent = `📣 ${m.name} wants to play ${m.mode === 'cheese' ? '🧀 Say Cheese' : m.mode === 'disco' ? '🪩 Dance Dance Disco' : m.mode === 'hydra' ? '🐍 Hydra Cubed' : '⚔️ 4xPVP'}!`;
   inviteToast.style.display = 'block';
   [660, 880, 1100].forEach((f, i) => setTimeout(() => tone(f, 0.1, 'triangle', 0.08), i * 100));
   clearTimeout(inviteTimer);
@@ -2118,6 +2464,12 @@ function updateLocal(dt) {
     me.yaw = Math.PI; me.pitch = 0.32; me.velY = 0;
     me.lockUntil = performance.now() + 150;
   }
+  // Hydra Cubed: stand at your spot in the arc, facing the monster
+  if (me.hydraSpot && inHydraGame()) {
+    me.pos.set(me.hydraSpot.x, 0, me.hydraSpot.z);
+    me.yaw = me.hydraSpot.yaw; me.pitch = 0; me.velY = 0; me.moving = false;
+    me.lockUntil = performance.now() + 150;
+  }
   const lockedOut = me.lockUntil && performance.now() < me.lockUntil;
   if (me.dash) {
     const k = Math.min(1, (performance.now() - me.dash.start) / me.dash.ms);
@@ -2193,7 +2545,8 @@ function updateLocal(dt) {
     a.body.root.position.copy(me.pos);
     a.body.root.rotation.y = me.yaw;
     a.body.dance = 0; a.body.partyGlow = 0;
-    a.body.update(dt, me.moving, me.pitch, downed);
+    a.body.update(dt, me.moving, me.pitch, downed || hydraDead(me.id));
+    hydraPoseBody(me.id, a.body, dt);
     a.body.root.visible = !hiddenForDisco(me.id);
     // you can still see yourself while cloaked, as a faint ghost
     const ghost = me.cloak > 0;
@@ -2211,7 +2564,8 @@ function updateRemotes(dt) {
     a.body.root.rotation.y += dy * Math.min(1, dt * 12);
     const downed = a.data.hp <= 0 && snap.fighters.includes(id) && snap.phase !== 'lobby';
     a.body.dance = 0; a.body.partyGlow = 0;
-    a.body.update(dt, a.data.moving, a.data.pitch, downed);
+    a.body.update(dt, a.data.moving, a.data.pitch, downed || hydraDead(id));
+    hydraPoseBody(id, a.body, dt);
     a.body.root.visible = !a.cloaked && !hiddenForDisco(id);   // cloaked, or stepping aside for the Disco dancers
   }
 }
@@ -2300,14 +2654,15 @@ function updatePads(dt, t) {
   });
   animatePads(cheesePads, ARENA.cheesePads, true);
   animatePads(nextPads, ARENA.nextPads, true);
+  animatePads(hydraPads, ARENA.hydraPads, true);
   animatePads(grayPads, ARENA.grayPads, false);
   // Lobby vs. active game: pads, corner signs and floor tints only show in the lobby (and during
   // the countdown so people can still hop on). During a game the room outline takes the game's color.
   const lobbyLook = snap.phase === 'lobby' || snap.phase === 'countdown';
   if (snap.mode !== 'disco' || lobbyLook) scene.background.setHex(0x05060a);
-  for (const pad of [...pads, ...cheesePads, ...nextPads, ...grayPads]) pad.group.visible = lobbyLook;
-  pvpSign.visible = cheeseSign.visible = discoSign.visible = pvpFloor.visible = cheeseFloor.visible = nextFloor.visible = lobbyLook;
-  if (roomEdges && snap.mode !== 'disco') roomEdges.material.color.setHex(lobbyLook ? 0xff3df2 : snap.mode === 'cheese' ? 0xffd400 : 0xff3030);
+  for (const pad of [...pads, ...cheesePads, ...nextPads, ...hydraPads, ...grayPads]) pad.group.visible = lobbyLook;
+  pvpSign.visible = cheeseSign.visible = discoSign.visible = hydraSign.visible = pvpFloor.visible = cheeseFloor.visible = nextFloor.visible = hydraFloor.visible = lobbyLook;
+  if (roomEdges && snap.mode !== 'disco') roomEdges.material.color.setHex(lobbyLook ? 0xff3df2 : snap.mode === 'cheese' ? 0xffd400 : snap.mode === 'hydra' ? HYDRA_RED : 0xff3030);
   // hatches glow when weapons are dropping
   hatchFlash = Math.max(0, hatchFlash - dt * 0.8);
   const fighting = snap.phase === 'fight';
@@ -2319,6 +2674,23 @@ function inCamGame() {
     || (snap.mode === 'disco' && (snap.phase === 'disco' || snap.phase === 'over'));
 }
 function updateCamera(dt) {
+  // Hydra Cubed: over your own shoulder, looking at the monster (or the other survivors)
+  if (me.hydraSpot && inHydraGame()) {
+    const s = me.hydraSpot, lean = hydraLocal.lean;
+    const fx = -Math.sin(s.yaw), fz = -Math.cos(s.yaw), rx = Math.cos(s.yaw), rz = -Math.sin(s.yaw);
+    const side = 0.55 + (lean === 'left' ? -0.35 : lean === 'right' ? 0.35 : 0), back = 2.3 + (lean === 'back' ? 0.4 : 0);
+    const want = new THREE.Vector3(s.x - fx * back + rx * side, 2.45, s.z - fz * back + rz * side);
+    if (!hydraCamInit) { camera.position.copy(want); hydraCamInit = true; }
+    camera.position.lerp(want, Math.min(1, dt * 8));
+    if (shake > 0) {
+      camera.position.add(new THREE.Vector3((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake));
+      shake = Math.max(0, shake - dt * 2);
+    }
+    const pvp = snap.hydra?.stage === 'pvp';
+    camera.lookAt(pvp ? s.x + fx * 5 : HYDRA.monsterPos.x, pvp ? 1.4 : 3.6, pvp ? s.z + fz * 5 : HYDRA.monsterPos.z);
+    return;
+  }
+  hydraCamInit = false;
   // Dance Dance Disco: look at the line of dancers from the front
   if (me.cheeseSpot && snap.mode === 'disco' && (snap.phase === 'disco' || snap.phase === 'over')) {
     camera.position.set(0 + (shake > 0 ? (Math.random() - 0.5) * shake : 0), 4 + (shake > 0 ? (Math.random() - 0.5) * shake : 0), 11.5);
@@ -2389,9 +2761,12 @@ function updateHud() {
     const cheeseOn = ARENA.cheesePads.filter(p => snap.players.some(pl => Math.hypot(pl.p[0] - p.x, pl.p[2] - p.z) <= p.r && pl.p[1] < 1)).length;
     if (onCheesePad(me.pos.x, me.pos.z, me.pos.y) || cheeseOn) status = `🧀 Say Cheese: stand on a yellow pad · ${cheeseOn}/${ARENA.cheesePads.length} pressed`;
     if (onPadList(ARENA.nextPads, me.pos.x, me.pos.z, me.pos.y)) status = '🪩 Dance Dance Disco: stand on a blue pad (2-4 dancers)';
+    if (onPadList(ARENA.hydraPads, me.pos.x, me.pos.z, me.pos.y)) status = '🐍 Hydra Cubed: stand on a crimson pad (1-4 players)';
     if (onPadList(ARENA.grayPads, me.pos.x, me.pos.z, me.pos.y)) status = 'These gray pads aren\'t used yet';
   } else if (snap.phase === 'countdown' && snap.mode === 'disco') status = isFighter() ? '🪩 Dance Dance Disco is starting — warm up!' : '🪩 Disco starting — hop on a free blue pad to join!';
   else if (snap.phase === 'disco') status = inDiscoGame() ? '🪩 Dance Dance Disco' : '🪩 Watching Dance Dance Disco';
+  else if (snap.phase === 'countdown' && snap.mode === 'hydra') status = isFighter() ? '🐍 Hydra Cubed is starting — get your camera ready!' : '🐍 Hydra Cubed starting — hop on a free crimson pad to join!';
+  else if (snap.phase === 'hydra') status = inHydraGame() ? '🐍 Hydra Cubed' : '🐍 Watching Hydra Cubed';
   else if (snap.phase === 'countdown') status = snap.mode === 'cheese'
     ? (isFighter() ? '🧀 Say Cheese is starting — get your face ready!' : '🧀 Say Cheese starting — hop on a free yellow pad to join!')
     : (isFighter() ? 'Get ready!' : 'Battle starting — jump on a free pad to join!');
@@ -2410,10 +2785,11 @@ function updateHud() {
   if (me.inv > 0) status = `🌈 INVINCIBLE ${Math.ceil(me.inv / 1000)}s — run into your enemy! · ` + status;
   else if (snap.phase === 'over') status = 'Match over — back to the lobby soon';
   ui.status.textContent = status;
+  ui.status.style.display = inHydraGame() ? 'none' : '';        // Hydra Cubed has its own title bar
 
   // fighter health bars
-  const cheeseOn = (snap.mode === 'cheese' || snap.mode === 'disco') && snap.phase !== 'lobby';
-  document.getElementById('me').style.display = cheeseOn && (inCheeseGame() || inDiscoGame()) ? 'none' : '';
+  const cheeseOn = (snap.mode === 'cheese' || snap.mode === 'disco' || snap.mode === 'hydra') && snap.phase !== 'lobby';
+  document.getElementById('me').style.display = cheeseOn && (inCheeseGame() || inDiscoGame() || inHydraGame()) ? 'none' : '';
   document.getElementById('weapon').style.display = cheeseOn ? 'none' : '';
   if (!cheeseOn && (snap.phase === 'fight' || snap.phase === 'over' || snap.phase === 'countdown')) {
     ui.fighters.style.display = 'flex';
@@ -2442,15 +2818,17 @@ function updateHud() {
     nm.textContent = a.data.name + (ml > 0 ? ` 💪${ml}${ml >= 5 ? ' MAX' : ''}` : '') + (a.data.w ? ` · ${WEAPONS[a.data.w].name}` : '');
     nm.style.color = hex(a.data.color);
     const bar = a.label.querySelector('.mini > div');
-    bar.style.width = `${a.data.hp}%`;
-    bar.style.background = hpColor(a.data.hp);
+    const hyd = hydraOn() ? hydraPlayer(id) : null;
+    const hpPct = hyd ? (HYDRA.hitsToKill - hyd[1]) / HYDRA.hitsToKill * 100 : a.data.hp;   // Hydra Cubed: armor left
+    bar.style.width = `${hpPct}%`;
+    bar.style.background = hpColor(hpPct);
   }
 
   const onLava = snap.lava && snap.lava.age >= LAVA.warnMs && me.pos.y < 0.4 && lavaAt(me.pos.x, me.pos.z) && me.hp > 0;
   if (onLava) ui.vignette.style.boxShadow = `inset 0 0 ${150 + Math.sin(clock.t * 10) * 30}px rgba(255,90,0,0.6)`;
   else if (ui.vignette.dataset.lava) ui.vignette.style.boxShadow = 'inset 0 0 160px rgba(255,0,0,0)';
   ui.vignette.dataset.lava = onLava ? '1' : '';
-  ui.crosshair.style.display = inCamGame() && me.cheeseSpot ? 'none' : '';
+  ui.crosshair.style.display = (inCamGame() && me.cheeseSpot) || inHydraGame() ? 'none' : '';
   hitMarkerT = Math.max(0, hitMarkerT - 1 / 60);
   ui.crosshair.classList.toggle('hit', hitMarkerT > 0);
 }
@@ -2475,6 +2853,7 @@ function frame() {
   updateRobots(dt, clock.t);
   updateCheese(dt, clock.t);
   updateDisco(dt, clock.t);
+  updateHydra(dt, clock.t);
   updatePadPanel();
   updateCamera(dt);
   updateHud();

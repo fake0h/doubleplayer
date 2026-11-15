@@ -7,11 +7,12 @@ Everyone who opens the site appears as a glowing wireframe body in a big neon ro
 - **4xPVP** (northwest corner, neon-green pads, big 4xPVP sign facing the Say Cheese sign across the room): the weapons free-for-all described below.
 - **Say Cheese** (northeast corner, yellow pads, big smiley face): a face-making game played with your camera. See below.
 - **Dance Dance Disco** (middle of the east wall, blue pads, next to the Say Cheese smiley): dance together for your cameras until the dance floor explodes. See below.
-- **Gray pads** (southeast corner, and across the room on the west wall in the middle and the southwest corner): not used yet.
+- **Hydra Cubed** (southeast corner, crimson pads, next to Dance Dance Disco, under a 2D three-headed hydra): fight three monsters with your camera, a shield and a sword. See below.
+- **Gray pads** (across the room on the west wall, in the middle and the southwest corner): not used yet.
 
-**Alone on a pad?** A panel pops up with **📣 Invite everyone** (key **I**): every other player in the arena gets a popup with a **Join** button (key **J**) that drops them onto a free pad. **🔗 Copy link** (key **L**) copies the game's address to send to friends who aren't on the site yet. On the Say Cheese pads there's also **▶ Play now** (key **P**) to start a game with everyone in front of your camera.
+**Alone on a pad?** A panel pops up with **📣 Invite everyone** (key **I**): every other player in the arena gets a popup with a **Join** button (key **J**) that drops them onto a free pad. **🔗 Copy link** (key **L**) copies the game's address to send to friends who aren't on the site yet. On the Say Cheese and Disco pads there's also **▶ Play now** (key **P**) to start a game with everyone in front of your camera. On the Hydra Cubed pads it's **▶ Fight the monsters alone**.
 
-**Lobby vs. game:** the pressure pads and corner signs only show in the lobby (and during the 3-second countdown, so people can still hop on). Once a game starts they disappear, and the glowing outline of the room turns red for 4xPVP or yellow for Say Cheese.
+**Lobby vs. game:** the pressure pads and corner signs only show in the lobby (and during the 3-second countdown, so people can still hop on). Once a game starts they disappear, and the glowing outline of the room turns red for 4xPVP, yellow for Say Cheese, or crimson for Hydra Cubed.
 
 The 4xPVP corner has **four pressure pads**. When 2 or more players stand on them, a **3, 2, 1** countdown starts, and anyone who hops on a free pad before it ends joins in. Then weapons rain down from the ceiling and it's a free-for-all. Knocked-out players lie down and watch, and the **last one standing wins**.
 
@@ -57,6 +58,37 @@ Stand on the blue pads (or press **Play now** when you're alone) and the music s
 6. At 500 points: **BOOM!** The video fades away, the dance floor explodes, everyone is blown into the air, and **everybody wins**. A results chart shows every dancer's photo and score.
 
 Several players can also each join from their own device: every camera finds its own dancers, and all their points fill the same party meter. Spectators see one dancing avatar per dancer in the 3D room. If the floor hasn't exploded after 2½ minutes, the music stops. Settings are in `shared/disco.js`. Add `?fakeface=1` to the address to try it with simulated dancers (3 dancers, a 4th walks in, one walks out and back).
+
+## Hydra Cubed
+
+**1 to 4 players**, each on their own device with their own camera. Stand on the crimson pads (or press **Fight the monsters alone**).
+
+You see the battle from just behind your own wireframe body (torso up). You hold a wireframe **shield** in your left hand and a **sword** in your right, and you wear **red wireframe armor**, which is your health:
+
+1. First hit: your **helmet** comes off.
+2. Second hit: your **arm armor** comes off.
+3. Third hit: your **chest armor** comes off.
+4. Fourth hit: you fall.
+
+**Controls (camera):** at the start, stand still facing your camera for a moment so it learns where you are.
+
+- **Raise your left hand** above your shoulder: the shield goes up for **2 seconds**, then it can't be raised again for **2 seconds**.
+- **Swing your right arm** fast: sword swing, **once a second**.
+- **Lean** your head left or right, or **lean back** (away from the camera).
+
+A small camera preview in the corner shows your stick figure and the lean lines. **Keys instead:** **F** shield, **Space** or click to swing, hold **A / D / S** (or the arrow keys) to lean left / right / back. On touchscreens there are on-screen buttons. When the game starts you can pick camera or keys.
+
+**The monsters.** The players stand in an arc around the monster. It sways, cocks a head back, then strikes one player.
+
+1. **Cobra (1 hit):** block the strike with your **shield**. You can hit it **right after it strikes**; swing any other time and it dodges.
+2. **Twin-Headed Hound (2 hits)** rises from the cobra's corpse: a two-headed snake on a dog's body. **Both heads rear back**, so you can't tell which will strike until the last moment, when the striking head turns red. Hold up your **shield AND lean away** from that head. You can only hit it **after it misses**.
+3. **Hydra (3 heads)** rises next. Watch which head rears back: **lean away** from the left or right head, and **lean back** from the middle head. After a miss, hit it to **chop off the head that attacked**. All three heads gone = dead hydra.
+
+The HUD tells you what to do (e.g. **🛡️ SHIELD UP + LEAN RIGHT!** when you're the target, **⚔️ IT MISSED — STRIKE NOW!** when it's open). The heads are named from the targeted player's point of view.
+
+**After the hydra:** if 2 or more players are still alive, they turn to face each other in a circle and fight. Your swing hits the rival you lean toward (or the nearest one), and a raised shield blocks it. **Last one standing wins.** Alone, you win by slaying the hydra. If everyone falls, the monsters win.
+
+Body tracking uses Google's MediaPipe body tracker in your own browser, and the video never leaves your device. Settings (timings, hit points) are in `shared/hydra.js`. Add `?fakeface=1` to the address to try it with a simulated body (use the keys to fight).
 
 ## Weapon wall
 
@@ -180,6 +212,7 @@ The game needs a Node server for WebSockets, so a static host like GitHub Pages 
 
 - `server.js`: serves the page and runs the game over WebSockets. It decides pad presses, the countdown, weapon drops, pickups, hits, and health, so players can't cheat their own health.
 - `shared/weapons.js`: weapon stats and arena layout, shared by server and client.
+- `shared/hydra.js` / `public/js/hydra.js`: Hydra Cubed settings, monsters, armor/shield/sword, and the camera controls.
 - `public/js/main.js`: Three.js scene, controls, networking, effects, HUD.
 - `public/js/body.js`: the wireframe body with capsule-shaped limbs and walk/attack animation.
 - `public/js/weaponMeshes.js`: a low-poly model for every weapon.
