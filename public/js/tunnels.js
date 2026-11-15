@@ -10,45 +10,108 @@ function rng(seed) {
   return () => { a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 
-// an original oil painting: a domed, columned rotunda on a green lawn at sunset
-function paintingTexture() {
-  const c = document.createElement('canvas'); c.width = 640; c.height = 480;
+// an original old-timey oil portrait: a woman from the Civil War era, center-parted hair,
+// high lace collar, dark dress with a cameo brooch, in an oval vignette with aged varnish
+export function paintingTexture() {
+  const c = document.createElement('canvas'); c.width = 480; c.height = 640;
   const x = c.getContext('2d');
-  const sky = x.createLinearGradient(0, 0, 0, 300);
-  sky.addColorStop(0, '#2b3a78'); sky.addColorStop(0.55, '#e57f4a'); sky.addColorStop(1, '#ffd38a');
-  x.fillStyle = sky; x.fillRect(0, 0, 640, 320);
-  // brushy clouds
-  for (let i = 0; i < 40; i++) {
-    x.fillStyle = `rgba(255,${180 + Math.random() * 60},${150 + Math.random() * 60},${0.15 + Math.random() * 0.2})`;
-    x.beginPath(); x.ellipse(Math.random() * 640, 40 + Math.random() * 160, 30 + Math.random() * 60, 6 + Math.random() * 10, 0, 0, Math.PI * 2); x.fill();
+  const W = 480, Hc = 640, cx = W / 2;
+  // dark, warm background
+  const bg = x.createRadialGradient(cx, 260, 40, cx, 300, 420);
+  bg.addColorStop(0, '#6b5a3a'); bg.addColorStop(0.5, '#3b2f1d'); bg.addColorStop(1, '#140f08');
+  x.fillStyle = bg; x.fillRect(0, 0, W, Hc);
+  // dress: dark shoulders and bodice
+  x.fillStyle = '#1b1a22';
+  x.beginPath();
+  x.moveTo(40, Hc); x.bezierCurveTo(50, 500, 120, 450, 190, 430);
+  x.lineTo(290, 430); x.bezierCurveTo(360, 450, 430, 500, 440, Hc); x.closePath(); x.fill();
+  // fabric folds
+  x.strokeStyle = 'rgba(90,90,110,0.35)'; x.lineWidth = 3;
+  for (const [a, b] of [[120, 640], [170, 620], [310, 620], [360, 640], [240, 640]]) {
+    x.beginPath(); x.moveTo(a, b); x.quadraticCurveTo(a + (cx - a) * 0.3, 520, cx + (a - cx) * 0.35, 455); x.stroke();
   }
-  // lawn
-  const lawn = x.createLinearGradient(0, 300, 0, 480);
-  lawn.addColorStop(0, '#4f8a3a'); lawn.addColorStop(1, '#1f4a1c');
-  x.fillStyle = lawn; x.fillRect(0, 300, 640, 180);
-  // trees
-  for (const [tx, s] of [[60, 1], [130, 0.8], [520, 0.9], [590, 1.1]]) {
-    x.fillStyle = '#3a2614'; x.fillRect(tx - 5 * s, 260, 10 * s, 60 * s);
-    x.fillStyle = '#2f5a24'; x.beginPath(); x.arc(tx, 250, 42 * s, 0, Math.PI * 2); x.fill();
-    x.fillStyle = 'rgba(120,170,60,0.5)'; x.beginPath(); x.arc(tx - 12 * s, 238, 22 * s, 0, Math.PI * 2); x.fill();
+  // neck
+  x.fillStyle = '#d9b48f';
+  x.beginPath(); x.moveTo(205, 340); x.lineTo(275, 340); x.lineTo(282, 440); x.lineTo(198, 440); x.closePath(); x.fill();
+  x.fillStyle = 'rgba(120,80,50,0.35)'; x.fillRect(205, 340, 70, 22);              // shadow under the chin
+  // high white lace collar
+  x.fillStyle = '#efe6d2';
+  x.beginPath(); x.moveTo(188, 412); x.quadraticCurveTo(cx, 395, 292, 412); x.lineTo(296, 446); x.quadraticCurveTo(cx, 470, 184, 446); x.closePath(); x.fill();
+  x.strokeStyle = 'rgba(150,130,100,0.7)'; x.lineWidth = 1.5;
+  for (let k = 0; k < 14; k++) { const px = 190 + k * 7.6; x.beginPath(); x.arc(px, 448 + Math.sin(k) * 2, 4, 0, Math.PI); x.stroke(); }
+  // cameo brooch
+  x.fillStyle = '#c99a3a'; x.beginPath(); x.ellipse(cx, 468, 17, 21, 0, 0, Math.PI * 2); x.fill();
+  x.fillStyle = '#e9c9a8'; x.beginPath(); x.ellipse(cx, 468, 12, 16, 0, 0, Math.PI * 2); x.fill();
+  x.fillStyle = '#c8a688'; x.beginPath(); x.ellipse(cx + 2, 466, 5, 8, 0.2, 0, Math.PI * 2); x.fill();
+  // hair behind the head (smoothed down over the ears into a low bun)
+  x.fillStyle = '#2a1a10';
+  x.beginPath(); x.ellipse(cx, 236, 106, 108, 0, 0, Math.PI * 2); x.fill();
+  x.beginPath(); x.ellipse(cx - 92, 320, 34, 40, 0, 0, Math.PI * 2); x.fill();
+  x.beginPath(); x.ellipse(cx + 92, 320, 34, 40, 0, 0, Math.PI * 2); x.fill();
+  // face
+  const face = x.createRadialGradient(cx - 15, 250, 10, cx, 270, 110);
+  face.addColorStop(0, '#f0d0ad'); face.addColorStop(0.7, '#d9b089'); face.addColorStop(1, '#a87d58');
+  x.fillStyle = face;
+  x.beginPath(); x.ellipse(cx, 268, 76, 98, 0, 0, Math.PI * 2); x.fill();
+  // center-parted hair framing the forehead
+  x.fillStyle = '#2a1a10';
+  x.beginPath(); x.moveTo(cx, 168);
+  x.bezierCurveTo(cx - 60, 166, cx - 92, 200, cx - 84, 290); x.bezierCurveTo(cx - 70, 240, cx - 40, 205, cx, 196); x.closePath(); x.fill();
+  x.beginPath(); x.moveTo(cx, 168);
+  x.bezierCurveTo(cx + 60, 166, cx + 92, 200, cx + 84, 290); x.bezierCurveTo(cx + 70, 240, cx + 40, 205, cx, 196); x.closePath(); x.fill();
+  x.strokeStyle = 'rgba(120,80,50,0.5)'; x.lineWidth = 2;                         // the part and a few glossy strands
+  x.beginPath(); x.moveTo(cx, 160); x.lineTo(cx, 198); x.stroke();
+  x.strokeStyle = 'rgba(110,80,55,0.35)';
+  for (const sgn of [-1, 1]) for (let k = 0; k < 5; k++) { x.beginPath(); x.moveTo(cx + sgn * 6, 172 + k * 3); x.quadraticCurveTo(cx + sgn * (60 + k * 5), 190 + k * 6, cx + sgn * (80 - k * 2), 270 + k * 4); x.stroke(); }
+  // eyes, brows, nose, mouth: calm, serious expression
+  for (const sgn of [-1, 1]) {
+    const ex = cx + sgn * 30, ey = 258;
+    x.fillStyle = '#f4ead8'; x.beginPath(); x.ellipse(ex, ey, 13, 6, 0, 0, Math.PI * 2); x.fill();
+    x.fillStyle = '#3d2a1a'; x.beginPath(); x.arc(ex + sgn * -1, ey, 5.5, 0, Math.PI * 2); x.fill();
+    x.fillStyle = '#fff'; x.beginPath(); x.arc(ex - 2, ey - 2, 1.4, 0, Math.PI * 2); x.fill();
+    x.strokeStyle = '#6b4a30'; x.lineWidth = 2;
+    x.beginPath(); x.ellipse(ex, ey - 1, 14, 7, 0, Math.PI * 1.05, Math.PI * 1.95); x.stroke();
+    x.strokeStyle = '#3a2618'; x.lineWidth = 3.5;
+    x.beginPath(); x.moveTo(ex - sgn * 15, ey - 16); x.quadraticCurveTo(ex, ey - 23, ex + sgn * 16, ey - 15); x.stroke();
   }
-  // the rotunda: steps, columns, pediment, drum and dome
-  const cx = 320;
-  x.fillStyle = '#d9cbb4'; x.fillRect(cx - 140, 300, 280, 14); x.fillRect(cx - 130, 290, 260, 12);
-  x.fillStyle = '#b5523a'; x.fillRect(cx - 120, 180, 240, 110);                         // brick
-  x.fillStyle = '#f2ece0';
-  for (let k = 0; k < 6; k++) x.fillRect(cx - 100 + k * 38, 190, 14, 100);              // columns
-  x.beginPath(); x.moveTo(cx - 125, 190); x.lineTo(cx, 140); x.lineTo(cx + 125, 190); x.closePath(); x.fill();
-  x.fillStyle = '#e8dfcc'; x.fillRect(cx - 95, 118, 190, 30);                             // drum
-  x.beginPath(); x.ellipse(cx, 120, 95, 75, 0, Math.PI, 0); x.fill();                     // dome
-  x.strokeStyle = 'rgba(120,100,80,0.5)'; x.lineWidth = 2;
-  for (let k = 1; k < 5; k++) { x.beginPath(); x.ellipse(cx, 120, 95 * k / 5, 75, 0, Math.PI, 0); x.stroke(); }
-  // a few painterly strokes on top
-  for (let i = 0; i < 300; i++) {
-    x.strokeStyle = `rgba(${200 + Math.random() * 55},${150 + Math.random() * 90},${90 + Math.random() * 90},0.08)`;
-    x.lineWidth = 3 + Math.random() * 4;
-    const px = Math.random() * 640, py = Math.random() * 480;
-    x.beginPath(); x.moveTo(px, py); x.lineTo(px + 10 + Math.random() * 20, py + (Math.random() - 0.5) * 6); x.stroke();
+  // nose: soft shadow down one side and a gentle curve at the tip
+  const ns = x.createLinearGradient(cx - 14, 0, cx + 2, 0);
+  ns.addColorStop(0, 'rgba(150,100,65,0)'); ns.addColorStop(1, 'rgba(150,100,65,0.35)');
+  x.fillStyle = ns; x.beginPath(); x.moveTo(cx - 2, 262); x.quadraticCurveTo(cx - 12, 290, cx - 10, 300); x.lineTo(cx + 2, 300); x.closePath(); x.fill();
+  x.strokeStyle = 'rgba(140,90,60,0.55)'; x.lineWidth = 2;
+  x.beginPath(); x.moveTo(cx - 11, 301); x.quadraticCurveTo(cx, 308, cx + 11, 301); x.stroke();
+  // soft shading on the shadow side of the face
+  const side = x.createLinearGradient(cx + 20, 0, cx + 78, 0);
+  side.addColorStop(0, 'rgba(110,70,40,0)'); side.addColorStop(1, 'rgba(110,70,40,0.3)');
+  x.fillStyle = side; x.beginPath(); x.ellipse(cx, 268, 76, 98, 0, -Math.PI / 2, Math.PI / 2); x.fill();
+  x.fillStyle = '#b4655a';
+  x.beginPath(); x.moveTo(cx - 20, 328); x.quadraticCurveTo(cx, 322, cx + 20, 328); x.quadraticCurveTo(cx, 338, cx - 20, 328); x.fill();
+  x.strokeStyle = '#7a3e36'; x.lineWidth = 1.5; x.beginPath(); x.moveTo(cx - 20, 328); x.quadraticCurveTo(cx, 330, cx + 20, 328); x.stroke();
+  x.fillStyle = 'rgba(210,120,100,0.18)';                                           // a little color in the cheeks
+  for (const sgn of [-1, 1]) { x.beginPath(); x.ellipse(cx + sgn * 42, 295, 20, 13, 0, 0, Math.PI * 2); x.fill(); }
+  // brush strokes
+  for (let i = 0; i < 500; i++) {
+    const px = Math.random() * W, py = Math.random() * Hc;
+    x.strokeStyle = `rgba(${90 + Math.random() * 80},${70 + Math.random() * 60},${40 + Math.random() * 40},0.06)`;
+    x.lineWidth = 2 + Math.random() * 4;
+    x.beginPath(); x.moveTo(px, py); x.lineTo(px + (Math.random() - 0.5) * 18, py + 6 + Math.random() * 14); x.stroke();
+  }
+  // oval vignette, like portraits of the 1860s
+  x.save();
+  x.fillStyle = '#0d0905';
+  x.beginPath(); x.rect(0, 0, W, Hc); x.ellipse(cx, 330, 205, 280, 0, 0, Math.PI * 2, true); x.fill('evenodd');
+  x.restore();
+  const vig = x.createRadialGradient(cx, 320, 150, cx, 330, 290);
+  vig.addColorStop(0, 'rgba(0,0,0,0)'); vig.addColorStop(1, 'rgba(10,6,2,0.85)');
+  x.fillStyle = vig; x.fillRect(0, 0, W, Hc);
+  // aged yellow varnish and fine cracks
+  x.fillStyle = 'rgba(160,120,40,0.16)'; x.fillRect(0, 0, W, Hc);
+  x.strokeStyle = 'rgba(20,12,4,0.1)'; x.lineWidth = 0.6;
+  for (let i = 0; i < 70; i++) {
+    let px = Math.random() * W, py = Math.random() * Hc;
+    x.beginPath(); x.moveTo(px, py);
+    for (let k = 0; k < 3; k++) { px += (Math.random() - 0.5) * 14; py += (Math.random() - 0.5) * 14; x.lineTo(px, py); }
+    x.stroke();
   }
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
@@ -181,20 +244,20 @@ export function buildTunnels(maze) {
   const painting = new THREE.Group();
   painting.position.set(pm.x, 1.75, pm.z);
   painting.rotation.y = Math.atan2(DIRS[pm.facing][0], DIRS[pm.facing][1]);
-  const canvasMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.2), new THREE.MeshBasicMaterial({ map: paintingTexture() }));
+  const canvasMesh = new THREE.Mesh(new THREE.PlaneGeometry(1.05, 1.4), new THREE.MeshBasicMaterial({ map: paintingTexture() }));
   canvasMesh.position.z = 0.06;
   // carved gold frame: outer and inner edges with bevel lines at the corners
   const frameMat = new THREE.LineBasicMaterial({ color: 0xffc23c });
   const frame = new THREE.Group();
-  frame.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1.9, 1.5, 0.12)), frameMat));
-  frame.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1.66, 1.26, 0.14)), frameMat));
+  frame.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1.32, 1.68, 0.12)), frameMat));
+  frame.add(new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(1.1, 1.45, 0.14)), frameMat));
   const bev = [];
-  for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) bev.push(sx * 0.95, sy * 0.75, 0.06, sx * 0.83, sy * 0.63, 0.07);
+  for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) bev.push(sx * 0.66, sy * 0.84, 0.06, sx * 0.55, sy * 0.725, 0.07);
   const bg = new THREE.BufferGeometry(); bg.setAttribute('position', new THREE.Float32BufferAttribute(bev, 3));
   frame.add(new THREE.LineSegments(bg, frameMat));
 
   const lamp = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.22, 0.18, 10, 1, true), new THREE.MeshBasicMaterial({ color: 0xffc23c, wireframe: true }));
-  lamp.position.set(0, 0.95, 0.3);
+  lamp.position.set(0, 1.05, 0.3);
   painting.add(frame, canvasMesh, lamp);
   g.add(painting);
 

@@ -98,7 +98,7 @@ Body tracking uses Google's MediaPipe body tracker in your own browser, and the 
 - **First person**, with the usual controls: **WASD** or arrow keys to walk, **mouse** to look, **Shift** (or hold right click) to run, **Space** to jump. On a touchscreen: the stick to walk (push all the way to run), drag to look, and the jump button.
 - The tunnels are **3D wireframes**: taller than wide (8 ft wide, 12 ft tall), with ribbed concrete walls, caged lamps, a few leaky pipes puffing steam, and **copper and steel pipes running along one side**.
 - The maze is a grid of tunnels, and every straight run is **50 to 200 feet** long (about 1,000 ft across). A new maze is made every game, and everyone in the race gets the same one.
-- The **painting** (a sunset over a domed rotunda in a gleaming gold frame) hangs at the end of the dead end farthest from the ladder. Walk up to it to win.
+- The **painting** (an old-timey portrait of a woman from the Civil War era, in a gleaming gold frame) hangs at the end of the dead end farthest from the ladder. Walk up to it to win.
 - You can see the other racers in the tunnels, but only when they're actually in view (no name tags through walls).
 - There's an **8-minute** limit. Afterwards everyone climbs back up next to the orange pads.
 
