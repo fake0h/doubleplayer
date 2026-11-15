@@ -74,11 +74,11 @@ You see the battle from just behind your own wireframe body (torso up). You hold
 
 - **Raise your left hand** above your shoulder: the shield goes up for **2 seconds**, then it can't be raised again for **2 seconds**.
 - **Swing your right arm** fast: sword swing, **once a second**.
-- **Lean** your head left or right, or **lean back** (away from the camera).
+- **With the camera, raising your shield blocks every monster's strike**, so you don't need to lean. (Leaning still picks your target in the final fight.)
 
 A small camera preview in the corner shows your stick figure and the lean lines. **Keys instead:** **F** shield, **Space** or click to swing, hold **A / D / S** (or the arrow keys) to lean left / right / back. On touchscreens there are on-screen buttons. When the game starts you can pick camera or keys.
 
-**The monsters.** The players stand in an arc around the monster. It sways, cocks a head back, then strikes one player.
+**The monsters.** The players stand in an arc around the monster. It sways, cocks a head back, then strikes one player. Camera players just raise the shield for every monster; the lean rules below are for keyboard / touch players.
 
 1. **Cobra (1 hit):** block the strike with your **shield**. You can hit it **right after it strikes**; swing any other time and it dodges.
 2. **Twin-Headed Hound (2 hits)** rises from the cobra's corpse: a two-headed snake on a dog's body. **Both heads rear back**, so you can't tell which will strike until the last moment, when the striking head turns red. Hold up your **shield AND lean away** from that head. You can only hit it **after it misses**.

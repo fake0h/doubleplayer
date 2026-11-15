@@ -478,8 +478,10 @@ function hydraHurt(hp, by) {
 }
 // does the target defend this strike? cobra: shield; twin: shield + lean away from the head;
 // hydra: lean away from left/right heads, lean back from the middle head
+// camera players only have to raise the shield against every monster (leaning is for keyboard players)
 function defends(hp, kind, headName, t) {
   const shield = t < hp.shieldUntil;
+  if (hp.camera) return shield;
   const away = headName === 'left' ? 'right' : headName === 'right' ? 'left' : 'back';
   if (kind === 'cobra') return shield;
   if (kind === 'twin') return shield && hp.lean === away;
@@ -525,7 +527,7 @@ function tickHydra(t) {
     m.lastHead = m.head;
     if (ok) {
       m.vulnerableUntil = t + HYDRA.vulnerableMs;
-      broadcast({ t: 'hydraFx', kind: m.kind === 'hydra' ? 'dodge' : 'block', id: target.id, head: headName });
+      broadcast({ t: 'hydraFx', kind: m.kind === 'hydra' && !target.camera ? 'dodge' : 'block', id: target.id, head: headName });
     } else {
       if (target && target.alive) hydraHurt(target, m.kind);
       // the cobra can be hit right after any strike; the others only after a miss
@@ -1140,7 +1142,7 @@ wss.on('connection', (ws) => {
       }
       case 'hydraReady': {
         const hp = hydra?.players.find(h => h.id === pl.id);
-        if (hp) hp.ready = true;
+        if (hp) { hp.ready = true; hp.camera = !!msg.camera; }
         break;
       }
       case 'hydraInput': {

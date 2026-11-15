@@ -1630,8 +1630,8 @@ async function useHydraCamera() {
   }
   hydraEl.ask.style.display = 'none';
 }
-function hydraReady() { if (!hydraLocal.ready) { hydraLocal.ready = true; send({ t: 'hydraReady' }); } }
-function hydraKeysOnly() { hydraEl.ask.style.display = 'none'; hydraCtl.stop(); hydraReady(); }
+function hydraReady(camera) { if (!hydraLocal.ready) { hydraLocal.ready = true; hydraLocal.camera = camera; send({ t: 'hydraReady', camera }); } }
+function hydraKeysOnly() { hydraEl.ask.style.display = 'none'; hydraCtl.stop(); hydraReady(false); }
 $('hydraCamYes').addEventListener('click', (e) => { e.stopPropagation(); useHydraCamera(); });
 $('hydraCamNo').addEventListener('click', (e) => { e.stopPropagation(); hydraKeysOnly(); });
 
@@ -1784,7 +1784,7 @@ function hydraTip(Hs, mine) {
   if (M.state === 'windup') {
     const headName = def.heads[M.head];
     if (M.target !== me.id) return [`⚠️ It's going for ${hydraPlayer(M.target)?.[9] ?? 'someone'}!`, ''];
-    if (M.kind === 'cobra') return ['🛡️ SHIELD UP!', 'danger'];
+    if (M.kind === 'cobra' || hydraLocal.camera) return ['🛡️ SHIELD UP!', 'danger'];
     if (M.kind === 'twin') {
       const k = (performance.now() - hydraStateAt) / hydraStateLen;
       return k > 0.55 ? [`🛡️ SHIELD UP + LEAN ${AWAY[headName]}!`, 'danger'] : ['⚠️ Which head?! Get ready…', 'danger'];
@@ -1792,6 +1792,7 @@ function hydraTip(Hs, mine) {
     return [`💨 LEAN ${AWAY[headName]}!`, 'danger'];
   }
   if (M.kind === 'cobra') return ['Watch it sway… raise your shield when it strikes, then hit it', ''];
+  if (hydraLocal.camera) return ['Raise your left hand to block when it strikes · swing your sword right after it misses', ''];
   if (M.kind === 'twin') return ['Shield up AND lean away from the head that strikes · hit it after it misses', ''];
   return ['Lean away from the left & right heads, lean BACK from the middle one · chop the head that misses', ''];
 }
@@ -1864,7 +1865,7 @@ function updateHydra(dt, t) {
   if (!mine) { hydraEl.camBox.style.display = 'none'; hydraEl.btns.style.display = 'none'; return; }
   // camera controls
   const c = hydraCtl.update(dt);
-  if (c.calibrated) { hydraReady(); feed('📷 Got you! Raise your left hand = shield · swing your right arm = sword · lean to dodge', '#00ffc8'); }
+  if (c.calibrated) { hydraReady(true); feed('📷 Got you! Raise your left hand = shield (blocks every attack) · swing your right arm = sword', '#00ffc8'); }
   if (c.shield) hydraShield();
   if (c.swing) hydraSwing();
   hydraCamLean = c.lean;
