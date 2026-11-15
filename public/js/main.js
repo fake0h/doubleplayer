@@ -8,6 +8,8 @@ import { MotionMeter, DiscoMusic, PoseTracker, BONES } from './dance.js';
 import { DISCO } from '/shared/disco.js';
 import { HYDRA } from '/shared/hydra.js';
 import { Monster, equipHydra, unequipHydra, poseHydra, HydraControl } from './hydra.js';
+import { TUNNELS, makeMaze, walkRects, canStand } from '/shared/tunnels.js';
+import { buildTunnels } from './tunnels.js';
 import { emotionById, CHEESE, CHEESE_SPOTS } from '/shared/emotions.js';
 
 // ---------- renderer / scene ----------
@@ -474,6 +476,10 @@ const HYDRA_RED = 0xff2a6a;
 const hydraPads = ARENA.hydraPads.map((p) => makePad(p, HYDRA_RED));        // Hydra Cubed: southeast corner
 const hydraFloor = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), new THREE.MeshBasicMaterial({ color: HYDRA_RED, transparent: true, opacity: 0.06, depthWrite: false }));
 hydraFloor.rotation.x = -Math.PI / 2; hydraFloor.position.set(21, 0.015, 21); scene.add(hydraFloor);
+const TUNNEL_ORANGE = 0xff8a1e;
+const tunnelPads = ARENA.tunnelPads.map((p) => makePad(p, TUNNEL_ORANGE));  // Steam Tunnels: middle of the west wall
+const tunnelFloor = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), new THREE.MeshBasicMaterial({ color: TUNNEL_ORANGE, transparent: true, opacity: 0.06, depthWrite: false }));
+tunnelFloor.rotation.x = -Math.PI / 2; tunnelFloor.position.set(-21, 0.015, 0); scene.add(tunnelFloor);
 const grayPads = ARENA.grayPads.map((p) => makePad(p, GRAY));               // unused for now
 for (const g of grayPads) { g.plateMat.emissiveIntensity = 0.05; g.ring.material.color.setHex(0x3a3f4a); }
 const nextFloor = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), new THREE.MeshBasicMaterial({ color: NEXT_BLUE, transparent: true, opacity: 0.06, depthWrite: false }));
@@ -567,6 +573,32 @@ const hydraSign = wallSign((x, W, Hc) => {
   x.shadowBlur = 0; x.fillStyle = '#ffd6e4'; x.font = 'bold 40px sans-serif';
   x.fillText('Camera battle · shield, sword, dodge · crimson pads', W / 2, Hc * 0.92, W - 80);
 }, 11, 7.5, new THREE.Vector3(HALF - 0.1, 6.5, 21), -Math.PI / 2);
+// Steam Tunnels: a tunnel disappearing into the dark, on the west wall above the orange pads
+const tunnelSign = wallSign((x, W, Hc) => {
+  const org = '#ff8a1e', blue = '#34c6ff';
+  x.fillStyle = 'rgba(4,8,22,0.9)'; x.fillRect(0, 0, W, Hc);
+  x.strokeStyle = org; x.lineWidth = 16; x.shadowColor = org; x.shadowBlur = 30; x.strokeRect(20, 20, W - 40, Hc - 40);
+  // tunnel in perspective: taller than wide, pipes along the right side
+  const cx = W / 2, cy = Hc * 0.55;
+  x.strokeStyle = blue; x.shadowColor = blue; x.shadowBlur = 14; x.lineWidth = 5;
+  for (let k = 0; k < 7; k++) {
+    const s = Math.pow(0.68, k), w = 150 * s, h = 230 * s;
+    x.globalAlpha = 1 - k * 0.12;
+    x.strokeRect(cx - w, cy - h * 0.55, w * 2, h);
+  }
+  x.globalAlpha = 1;
+  x.beginPath();
+  for (const [sx, sy] of [[-1, -0.55], [1, -0.55], [-1, 0.45], [1, 0.45]]) { x.moveTo(cx + sx * 150, cy + sy * 230); x.lineTo(cx + sx * 150 * 0.1, cy + sy * 230 * 0.1); }
+  x.stroke();
+  x.strokeStyle = org; x.shadowColor = org; x.lineWidth = 9;
+  for (const py of [-0.32, -0.42]) { x.beginPath(); x.moveTo(cx + 135, cy + py * 230); x.lineTo(cx + 14, cy + py * 23); x.stroke(); }
+  // a tiny gold frame glinting at the end
+  x.fillStyle = '#ffc23c'; x.shadowColor = '#ffc23c'; x.shadowBlur = 20; x.fillRect(cx - 9, cy - 10, 18, 13);
+  x.shadowBlur = 30; x.shadowColor = org; x.fillStyle = org; x.textAlign = 'center'; x.textBaseline = 'middle';
+  x.font = '900 110px sans-serif'; x.fillText('STEAM TUNNELS', W / 2, Hc * 0.13, W - 80);
+  x.shadowBlur = 0; x.fillStyle = '#ffe2c4'; x.font = 'bold 40px sans-serif';
+  x.fillText('Under UVA · find the hidden painting · orange pads', W / 2, Hc * 0.92, W - 80);
+}, 11, 7.5, new THREE.Vector3(-HALF + 0.1, 6.5, 0), Math.PI / 2);
 const cheeseFloor = new THREE.Mesh(new THREE.PlaneGeometry(14, 14), new THREE.MeshBasicMaterial({ color: CHEESE_YELLOW, transparent: true, opacity: 0.06, depthWrite: false }));
 cheeseFloor.rotation.x = -Math.PI / 2; cheeseFloor.position.set(21, 0.015, -21); scene.add(cheeseFloor);
 
@@ -894,6 +926,7 @@ function connect() {
       case 'countdown': {
         const names = m.fighters.map(id => avatars.get(id)?.data.name ?? '?');
         if (m.mode === 'disco') { banner(`🪩 DANCE DANCE DISCO: ${names.join(', ')}\nOthers: hop on a free blue pad to join!`, 3000); break; }
+        if (m.mode === 'tunnels') { banner(`🔦 STEAM TUNNELS: ${names.join(', ')}\nOthers: hop on a free orange pad to join!`, 3000); break; }
         if (m.mode === 'hydra') { banner(`🐍 HYDRA CUBED: ${names.join(', ')}\nOthers: hop on a free crimson pad to join!`, 3000); break; }
         banner(m.mode === 'cheese' ? `🧀 SAY CHEESE: ${names.join(', ')}\nOthers: hop on a free yellow pad to join!` : `${names.join(' vs ')}\nOthers: jump on a free pad to join!`, 3000);
         break;
@@ -914,6 +947,14 @@ function connect() {
         const streakLine = m.streak >= 2 ? `\n${m.streak} wins in a row!` : '';
         const muscleLine = lvl >= 5 ? ' MAX MUSCLE — GLOWING!' : lvl > 0 ? ` Muscle level ${lvl}` : '';
         if (m.mode === 'disco') { showDiscoResults(m); banner(m.boom ? '💥 THE DANCE FLOOR EXPLODED — EVERYBODY WINS! 💥' : '🪩 The music stopped!', 5500); break; }
+        if (m.mode === 'tunnels') {
+          const t = `${Math.floor(m.secs / 60)}:${String(m.secs % 60).padStart(2, '0')}`;
+          banner(m.winner ? `🖼️ ${m.name} FOUND THE PAINTING!\nin ${t}` : `🔦 ${m.reason}`, 5500);
+          feed(m.reason, '#ffc23c');
+          tone(m.winner === me.id ? 660 : 200, 0.6, 'triangle', 0.15, m.winner === me.id ? 400 : -100);
+          if (m.winner === me.id) [523, 659, 784, 1047].forEach((f, i) => setTimeout(() => tone(f, 0.18, 'triangle', 0.09), 500 + i * 140));
+          break;
+        }
         if (m.mode === 'hydra') {
           banner(m.winner ? `🐍 ${m.name} WINS HYDRA CUBED! 🐍\n${m.reason}` : `🐍 ${m.reason}`, 5500);
           feed(m.reason, '#ffd23c');
@@ -957,6 +998,8 @@ function connect() {
       case 'admin': onAdminResult(m); break;
       case 'cheeseStart': onCheeseStart(m); hideInvite(); break;
       case 'hydraStart': onHydraStart(m); hideInvite(); break;
+      case 'tunnelStart': onTunnelStart(m); hideInvite(); break;
+      case 'tunnelExit': me.pos.set(...m.p); me.velY = 0; me.inTunnel = false; break;
       case 'hydraFx': onHydraFx(m); break;
       case 'invite': onInvite(m); break;
       case 'cheeseCount': onCheeseCount(m); break;
@@ -1593,6 +1636,117 @@ function updateVirtualAvatars(dt) {
   }
 }
 
+// ---------- Steam Tunnels client ----------
+const tunnelScene = new THREE.Scene();
+tunnelScene.background = new THREE.Color(0x000000);
+tunnelScene.fog = new THREE.Fog(0x000000, 3, 34);
+let tunnelWorld = null, tunnelRects = null, tunnelBob = 0, foundSentAt = 0, tunnelSend = 0;
+const tunnelEl = { hud: $('tunnelHud'), time: $('tunnelTime'), tip: $('tunnelTip') };
+function tunnelsOn() { return snap.mode === 'tunnels' && !!snap.tunnels && (snap.phase === 'tunnels' || snap.phase === 'over'); }
+function inTunnelGame() { return !!tunnelWorld && !!me.inTunnel; }
+function onTunnelStart(m) {
+  tunnelWorld?.dispose();
+  const maze = makeMaze(m.seed);
+  tunnelWorld = buildTunnels(maze);
+  tunnelWorld.maze = maze;
+  tunnelRects = walkRects(maze);
+  tunnelScene.add(tunnelWorld.group);
+  me.inTunnel = true;
+  me.pos.set(...m.p); me.yaw = m.yaw; me.pitch = 0; me.velY = 0; me.onGround = true; me.padAir = false; me.dash = null;
+  noise(0.6, 0.08); tone(110, 0.5, 'sine', 0.1, -40);   // clang of the manhole cover
+}
+// first-person walking: WASD / arrows / stick, Shift (or a full stick) to run, Space to jump, mouse to look
+function updateTunnelLocal(dt) {
+  const fwd = new THREE.Vector3(-Math.sin(me.yaw), 0, -Math.cos(me.yaw));
+  const right = new THREE.Vector3(Math.cos(me.yaw), 0, -Math.sin(me.yaw));
+  const move = new THREE.Vector3();
+  let sprint = keys.ShiftLeft || keys.ShiftRight;
+  if (touch.active && started && (touch.move.x || touch.move.y)) {
+    move.addScaledVector(fwd, -touch.move.y).addScaledVector(right, touch.move.x);
+    if (Math.hypot(touch.move.x, touch.move.y) > 0.92) sprint = true;
+  }
+  if (locked) {
+    if (rightHeld) { move.add(fwd); sprint = true; }
+    if ((keys.KeyW || keys.ArrowUp) && !rightHeld) move.add(fwd);
+    if (keys.KeyS || keys.ArrowDown) move.sub(fwd);
+    if (keys.KeyD || keys.ArrowRight) move.add(right);
+    if (keys.KeyA || keys.ArrowLeft) move.sub(right);
+  }
+  me.moving = move.lengthSq() > 0.0025;
+  if (me.moving) {
+    if (move.lengthSq() > 1) move.normalize();
+    move.multiplyScalar((sprint ? TUNNELS.runSpeed : TUNNELS.walkSpeed) * dt);
+    // slide along the tunnel walls
+    if (canStand(tunnelRects, me.pos.x + move.x, me.pos.z)) me.pos.x += move.x;
+    if (canStand(tunnelRects, me.pos.x, me.pos.z + move.z)) me.pos.z += move.z;
+    tunnelBob += dt * (sprint ? 13 : 9);
+  }
+  if (((locked && (keys.Space || jumpReq)) || touch.jump) && me.onGround) { me.velY = 5.2; me.onGround = false; tone(300, 0.1, 'triangle', 0.05, 200); }
+  touch.jump = false; jumpReq = false;
+  me.velY -= ARENA.gravity * dt;
+  me.pos.y += me.velY * dt;
+  if (me.pos.y <= 0) { me.pos.y = 0; me.velY = 0; me.onGround = true; }
+  const ceil = TUNNELS.height - TUNNELS.eyeHeight - 0.2;
+  if (me.pos.y > ceil) { me.pos.y = ceil; me.velY = Math.min(0, me.velY); }   // bonk
+  tunnelSend += dt;
+  if (tunnelSend > 0.05) {
+    tunnelSend = 0;
+    send({ t: 'state', p: [me.pos.x, me.pos.y, me.pos.z], yaw: me.yaw, pitch: me.pitch, moving: me.moving });
+  }
+  const a = me.id != null ? avatars.get(me.id) : null;
+  if (a) {
+    a.body.root.position.copy(me.pos);
+    a.body.root.rotation.y = me.yaw;
+    a.body.update(dt, me.moving, me.pitch, false);
+    a.body.root.visible = false;        // first person: you don't see your own body
+  }
+}
+// can you see them down the tunnel? (no name tags through walls)
+function tunnelSight(a, b) {
+  const d = Math.hypot(b.x - a.x, b.z - a.z);
+  if (d > 30) return false;
+  for (let k = 1, n = Math.ceil(d / 0.4); k < n; k++) {
+    if (!canStand(tunnelRects, a.x + (b.x - a.x) * k / n, a.z + (b.z - a.z) * k / n, 0)) return false;
+  }
+  return true;
+}
+// clicks in the tunnels just look around (no attacking)
+addEventListener('click', (e) => {
+  if (inTunnelGame() && locked && e.target === renderer.domElement) e.stopPropagation();
+}, true);
+function updateTunnels(dt, t) {
+  const on = tunnelsOn();
+  // racers live in the tunnel scene; everyone else stays up in the arena
+  const runners = on ? snap.tunnels.runners : [];
+  for (const [id, a] of avatars) {
+    const want = runners.includes(id) ? tunnelScene : scene;
+    if (a.body.root.parent !== want) want.add(a.body.root);
+  }
+  if (snap.phase === 'lobby' && me.inTunnel) me.inTunnel = false;
+  if (!inTunnelGame()) {
+    tunnelEl.hud.style.display = 'none';
+    if (tunnelWorld && !on) { tunnelWorld.dispose(); tunnelWorld = null; }
+    return;
+  }
+  tunnelWorld.update(dt, t);
+  tunnelEl.hud.style.display = 'block';
+  const left = Math.ceil((snap.tunnels?.left ?? 0) / 1000);
+  tunnelEl.time.textContent = on ? `⏱ ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}` : '';
+  const P = tunnelWorld.maze.painting;
+  const near = Math.hypot(me.pos.x - P.x, me.pos.z - P.z) < TUNNELS.findDist;
+  if (near && snap.phase === 'tunnels' && performance.now() - foundSentAt > 500) { foundSentAt = performance.now(); send({ t: 'tunnelFound' }); }
+  const others = runners.length - 1;
+  tunnelEl.tip.className = near ? 'found' : '';
+  tunnelEl.tip.textContent = near ? '🖼️ YOU FOUND THE PAINTING!'
+    : snap.phase === 'over' ? 'The search is over — climbing back up soon'
+    : `Find the hidden painting${others > 0 ? ` before the other ${others === 1 ? 'racer' : others + ' racers'}` : ''}! · ${touch.active ? 'stick to walk, drag to look' : 'WASD walk · Shift run · Space jump · mouse look'}`;
+  // the hiss of a nearby steam leak
+  if (Math.random() < dt * 0.6) {
+    const v = tunnelWorld.vents.find(q => Math.hypot(q.x - me.pos.x, q.z - me.pos.z) < 12);
+    if (v) noise(0.5, 0.03);
+  }
+}
+
 // ---------- Hydra Cubed client ----------
 const hydraCtl = new HydraControl();
 const hydraEl = { hud: $('hydraHud'), name: $('hydraName'), hp: $('hydraHp'), tip: $('hydraTip'), me: $('hydraMe'), armor: $('hydraArmor'),
@@ -2150,7 +2304,7 @@ function padsPressedBy(list) {
 function updatePadPanel() {
   aloneMode = null;
   if (snap.phase === 'lobby' && started) {
-    for (const [mode, list] of [['pvp', ARENA.pads], ['cheese', ARENA.cheesePads], ['disco', ARENA.nextPads], ['hydra', ARENA.hydraPads]]) {
+    for (const [mode, list] of [['pvp', ARENA.pads], ['cheese', ARENA.cheesePads], ['disco', ARENA.nextPads], ['hydra', ARENA.hydraPads], ['tunnels', ARENA.tunnelPads]]) {
       const on = [...new Set(padsPressedBy(list).flat())];
       if (on.length === 1 && on[0] === me.id) aloneMode = mode;
     }
@@ -2160,9 +2314,10 @@ function updatePadPanel() {
   $('padTitle').textContent = aloneMode === 'cheese' ? '🧀 Say Cheese — invite friends, or play now with everyone on your camera'
     : aloneMode === 'disco' ? '🪩 Dance Dance Disco — invite friends, or dance now with everyone on your camera'
     : aloneMode === 'hydra' ? '🐍 Hydra Cubed — invite friends, or fight the monsters alone'
+    : aloneMode === 'tunnels' ? '🔦 Steam Tunnels — invite friends to race, or explore alone'
     : '⚔️ 4xPVP needs at least 2 players — invite someone!';
   $('btnSolo').style.display = aloneMode === 'pvp' ? 'none' : '';
-  const soloLabel = aloneMode === 'hydra' ? '▶ Fight the monsters alone<kbd>P</kbd>' : '▶ Play now (everyone on this camera)<kbd>P</kbd>';
+  const soloLabel = aloneMode === 'tunnels' ? '▶ Explore alone<kbd>P</kbd>' : aloneMode === 'hydra' ? '▶ Fight the monsters alone<kbd>P</kbd>' : '▶ Play now (everyone on this camera)<kbd>P</kbd>';
   if ($('btnSolo').innerHTML !== soloLabel) $('btnSolo').innerHTML = soloLabel;
 }
 function sendInvite() { if (aloneMode) { send({ t: 'invite', mode: aloneMode }); tone(880, 0.1, 'triangle', 0.07); } }
@@ -2173,7 +2328,7 @@ async function copyLink() {
     else { await navigator.clipboard.writeText(url); feed('🔗 Link copied — paste it to a friend!', '#00e5ff'); }
   } catch { feed(`🔗 Share this link: ${url}`, '#00e5ff'); }
 }
-function playSolo() { if (aloneMode === 'cheese' || aloneMode === 'disco' || aloneMode === 'hydra') send({ t: 'soloStart', mode: aloneMode }); }
+function playSolo() { if (aloneMode === 'cheese' || aloneMode === 'disco' || aloneMode === 'hydra' || aloneMode === 'tunnels') send({ t: 'soloStart', mode: aloneMode }); }
 function acceptInvite() {
   if (!pendingInvite) return;
   send({ t: 'acceptInvite', mode: pendingInvite.mode });
@@ -2182,7 +2337,7 @@ function acceptInvite() {
 function hideInvite() { pendingInvite = null; inviteToast.style.display = 'none'; clearTimeout(inviteTimer); }
 function onInvite(m) {
   pendingInvite = m;
-  $('inviteMsg').textContent = `📣 ${m.name} wants to play ${m.mode === 'cheese' ? '🧀 Say Cheese' : m.mode === 'disco' ? '🪩 Dance Dance Disco' : m.mode === 'hydra' ? '🐍 Hydra Cubed' : '⚔️ 4xPVP'}!`;
+  $('inviteMsg').textContent = `📣 ${m.name} wants to play ${m.mode === 'cheese' ? '🧀 Say Cheese' : m.mode === 'disco' ? '🪩 Dance Dance Disco' : m.mode === 'hydra' ? '🐍 Hydra Cubed' : m.mode === 'tunnels' ? '🔦 Steam Tunnels' : '⚔️ 4xPVP'}!`;
   inviteToast.style.display = 'block';
   [660, 880, 1100].forEach((f, i) => setTimeout(() => tone(f, 0.1, 'triangle', 0.08), i * 100));
   clearTimeout(inviteTimer);
@@ -2455,6 +2610,7 @@ function groundHeight(x, z, y) {
 }
 
 function updateLocal(dt) {
+  if (inTunnelGame()) return updateTunnelLocal(dt);
   const downed = me.hp <= 0 && (snap.phase === 'fight' || snap.phase === 'over') && snap.fighters.includes(me.id);
   const fwd = new THREE.Vector3(-Math.sin(me.yaw), 0, -Math.cos(me.yaw));
   const right = new THREE.Vector3(Math.cos(me.yaw), 0, -Math.sin(me.yaw));
@@ -2656,14 +2812,15 @@ function updatePads(dt, t) {
   animatePads(cheesePads, ARENA.cheesePads, true);
   animatePads(nextPads, ARENA.nextPads, true);
   animatePads(hydraPads, ARENA.hydraPads, true);
+  animatePads(tunnelPads, ARENA.tunnelPads, true);
   animatePads(grayPads, ARENA.grayPads, false);
   // Lobby vs. active game: pads, corner signs and floor tints only show in the lobby (and during
   // the countdown so people can still hop on). During a game the room outline takes the game's color.
   const lobbyLook = snap.phase === 'lobby' || snap.phase === 'countdown';
   if (snap.mode !== 'disco' || lobbyLook) scene.background.setHex(0x05060a);
-  for (const pad of [...pads, ...cheesePads, ...nextPads, ...hydraPads, ...grayPads]) pad.group.visible = lobbyLook;
-  pvpSign.visible = cheeseSign.visible = discoSign.visible = hydraSign.visible = pvpFloor.visible = cheeseFloor.visible = nextFloor.visible = hydraFloor.visible = lobbyLook;
-  if (roomEdges && snap.mode !== 'disco') roomEdges.material.color.setHex(lobbyLook ? 0xff3df2 : snap.mode === 'cheese' ? 0xffd400 : snap.mode === 'hydra' ? HYDRA_RED : 0xff3030);
+  for (const pad of [...pads, ...cheesePads, ...nextPads, ...hydraPads, ...tunnelPads, ...grayPads]) pad.group.visible = lobbyLook;
+  pvpSign.visible = cheeseSign.visible = discoSign.visible = hydraSign.visible = tunnelSign.visible = pvpFloor.visible = cheeseFloor.visible = nextFloor.visible = hydraFloor.visible = tunnelFloor.visible = lobbyLook;
+  if (roomEdges && snap.mode !== 'disco') roomEdges.material.color.setHex(lobbyLook ? 0xff3df2 : snap.mode === 'cheese' ? 0xffd400 : snap.mode === 'hydra' ? HYDRA_RED : snap.mode === 'tunnels' ? TUNNEL_ORANGE : 0xff3030);
   // hatches glow when weapons are dropping
   hatchFlash = Math.max(0, hatchFlash - dt * 0.8);
   const fighting = snap.phase === 'fight';
@@ -2675,6 +2832,13 @@ function inCamGame() {
     || (snap.mode === 'disco' && (snap.phase === 'disco' || snap.phase === 'over'));
 }
 function updateCamera(dt) {
+  // Steam Tunnels: first person
+  if (inTunnelGame()) {
+    const bob = Math.sin(tunnelBob) * 0.045;
+    camera.position.set(me.pos.x, me.pos.y + TUNNELS.eyeHeight + bob, me.pos.z);
+    camera.rotation.set(me.pitch, me.yaw, 0, 'YXZ');
+    return;
+  }
   // Hydra Cubed: over your own shoulder, looking at the monster (or the other survivors)
   if (me.hydraSpot && inHydraGame()) {
     const s = me.hydraSpot, lean = hydraLocal.lean;
@@ -2763,11 +2927,14 @@ function updateHud() {
     if (onCheesePad(me.pos.x, me.pos.z, me.pos.y) || cheeseOn) status = `🧀 Say Cheese: stand on a yellow pad · ${cheeseOn}/${ARENA.cheesePads.length} pressed`;
     if (onPadList(ARENA.nextPads, me.pos.x, me.pos.z, me.pos.y)) status = '🪩 Dance Dance Disco: stand on a blue pad (2-4 dancers)';
     if (onPadList(ARENA.hydraPads, me.pos.x, me.pos.z, me.pos.y)) status = '🐍 Hydra Cubed: stand on a crimson pad (1-4 players)';
+    if (onPadList(ARENA.tunnelPads, me.pos.x, me.pos.z, me.pos.y)) status = '🔦 Steam Tunnels: stand on an orange pad (1-4 players)';
     if (onPadList(ARENA.grayPads, me.pos.x, me.pos.z, me.pos.y)) status = 'These gray pads aren\'t used yet';
   } else if (snap.phase === 'countdown' && snap.mode === 'disco') status = isFighter() ? '🪩 Dance Dance Disco is starting — warm up!' : '🪩 Disco starting — hop on a free blue pad to join!';
   else if (snap.phase === 'disco') status = inDiscoGame() ? '🪩 Dance Dance Disco' : '🪩 Watching Dance Dance Disco';
   else if (snap.phase === 'countdown' && snap.mode === 'hydra') status = isFighter() ? '🐍 Hydra Cubed is starting — get your camera ready!' : '🐍 Hydra Cubed starting — hop on a free crimson pad to join!';
   else if (snap.phase === 'hydra') status = inHydraGame() ? '🐍 Hydra Cubed' : '🐍 Watching Hydra Cubed';
+  else if (snap.phase === 'countdown' && snap.mode === 'tunnels') status = isFighter() ? '🔦 Heading down into the steam tunnels…' : '🔦 Steam Tunnels starting — hop on a free orange pad to join!';
+  else if (snap.phase === 'tunnels') status = `🔦 ${snap.tunnels?.runners.length || 0} searching the steam tunnels for the hidden painting…`;
   else if (snap.phase === 'countdown') status = snap.mode === 'cheese'
     ? (isFighter() ? '🧀 Say Cheese is starting — get your face ready!' : '🧀 Say Cheese starting — hop on a free yellow pad to join!')
     : (isFighter() ? 'Get ready!' : 'Battle starting — jump on a free pad to join!');
@@ -2786,11 +2953,11 @@ function updateHud() {
   if (me.inv > 0) status = `🌈 INVINCIBLE ${Math.ceil(me.inv / 1000)}s — run into your enemy! · ` + status;
   else if (snap.phase === 'over') status = 'Match over — back to the lobby soon';
   ui.status.textContent = status;
-  ui.status.style.display = inHydraGame() ? 'none' : '';        // Hydra Cubed has its own title bar
+  ui.status.style.display = inHydraGame() || inTunnelGame() ? 'none' : '';        // Hydra Cubed has its own title bar
 
   // fighter health bars
-  const cheeseOn = (snap.mode === 'cheese' || snap.mode === 'disco' || snap.mode === 'hydra') && snap.phase !== 'lobby';
-  document.getElementById('me').style.display = cheeseOn && (inCheeseGame() || inDiscoGame() || inHydraGame()) ? 'none' : '';
+  const cheeseOn = (snap.mode === 'cheese' || snap.mode === 'disco' || snap.mode === 'hydra' || snap.mode === 'tunnels') && snap.phase !== 'lobby';
+  document.getElementById('me').style.display = (cheeseOn && (inCheeseGame() || inDiscoGame() || inHydraGame())) || inTunnelGame() ? 'none' : '';
   document.getElementById('weapon').style.display = cheeseOn ? 'none' : '';
   if (!cheeseOn && (snap.phase === 'fight' || snap.phase === 'over' || snap.phase === 'countdown')) {
     ui.fighters.style.display = 'flex';
@@ -2807,7 +2974,8 @@ function updateHud() {
 
   // name tags over other players
   for (const [id, a] of avatars) {
-    if (id === me.id || a.cloaked || danceView.style.display === 'block') { a.label.style.display = 'none'; continue; }
+    if (id === me.id || a.cloaked || danceView.style.display === 'block' || a.body.root.parent !== (inTunnelGame() ? tunnelScene : scene)) { a.label.style.display = 'none'; continue; }
+    if (inTunnelGame() && !tunnelSight(me.pos, a.body.root.position)) { a.label.style.display = 'none'; continue; }
     const p = a.body.root.position.clone().add(new THREE.Vector3(0, 2.25, 0));
     const v = p.project(camera);
     if (v.z > 1 || Math.abs(v.x) > 1.2 || Math.abs(v.y) > 1.2) { a.label.style.display = 'none'; continue; }
@@ -2855,10 +3023,11 @@ function frame() {
   updateCheese(dt, clock.t);
   updateDisco(dt, clock.t);
   updateHydra(dt, clock.t);
+  updateTunnels(dt, clock.t);
   updatePadPanel();
   updateCamera(dt);
   updateHud();
-  renderer.render(scene, camera);
+  renderer.render(inTunnelGame() ? tunnelScene : scene, camera);
   requestAnimationFrame(frame);
 }
 
@@ -2866,4 +3035,4 @@ connect();
 frame();
 
 // expose a little for debugging / automated tests
-window.__dp = { me, snap: () => snap, avatars, floorWeapons, send, scene, camera, THREE, test: { updateLocal, updateWalls, touch, wallMeshes } };
+window.__dp = { me, tunnels: () => tunnelWorld && { maze: tunnelWorld.maze, cell: TUNNELS.cell, cols: TUNNELS.cols, rows: TUNNELS.rows }, snap: () => snap, avatars, floorWeapons, send, scene, camera, THREE, test: { updateLocal, updateWalls, touch, wallMeshes } };

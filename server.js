@@ -8,6 +8,7 @@ import { WebSocketServer } from 'ws';
 import { EMOTION_IDS, emotionById, CHEESE, CHEESE_SPOTS } from './shared/emotions.js';
 import { DISCO } from './shared/disco.js';
 import { HYDRA, hydraSpots, pvpSpots } from './shared/hydra.js';
+import { TUNNELS, makeMaze, walkRects, canStand } from './shared/tunnels.js';
 import {
   WEAPONS, USES_PER_WEAPON, MAX_HEALTH, ARENA, FALL_MS, randomWeaponType, HIT_TUNING,
   randomSpecialType, usesOf, wallBox, wallHeightAt, segmentHitsWalls, jumpPadPos, BOMBS,
@@ -189,8 +190,8 @@ function onPad(player, pad) {
 function padOccupants(padList = ARENA.pads) {
   return padList.map(pad => [...players.values()].filter(pl => onPad(pl, pad)).map(pl => pl.id));
 }
-const modePads = (mode) => (mode === 'cheese' ? ARENA.cheesePads : mode === 'disco' ? ARENA.nextPads : mode === 'hydra' ? ARENA.hydraPads : ARENA.pads);
-const asMode = (m) => (['pvp', 'cheese', 'disco', 'hydra'].includes(m) ? m : 'pvp');
+const modePads = (mode) => (mode === 'cheese' ? ARENA.cheesePads : mode === 'disco' ? ARENA.nextPads : mode === 'hydra' ? ARENA.hydraPads : mode === 'tunnels' ? ARENA.tunnelPads : ARENA.pads);
+const asMode = (m) => (['pvp', 'cheese', 'disco', 'hydra', 'tunnels'].includes(m) ? m : 'pvp');
 
 // One player per pad, each player counted once. Returns the list of fighters (0-4).
 function padFighters(occ) {
@@ -252,6 +253,7 @@ function spawnWeapon(forceType) {
         || ARENA.nextPads.some(p => Math.hypot(x - p.x, z - p.z) < 3)
         || ARENA.grayPads.some(p => Math.hypot(x - p.x, z - p.z) < 3)
         || ARENA.hydraPads.some(p => Math.hypot(x - p.x, z - p.z) < 3)
+        || ARENA.tunnelPads.some(p => Math.hypot(x - p.x, z - p.z) < 3)
         || insideAnyWall(x, z, 1.2));
   const specialsOut = [...weapons.values()].filter(w => WEAPONS[w.type].special).length;
   let type = forceType;
@@ -264,6 +266,7 @@ function resetToLobby() {
   game.phase = 'lobby';
   disco = null;
   hydra = null;
+  exitTunnels();
   game.solo = false;
   game.mode = 'pvp';
   cheese = null;
@@ -310,7 +313,7 @@ function tickGame() {
   const t = now();
   if (game.phase === 'lobby') {
     // green pads start 4xPVP, yellow pads start Say Cheese
-    for (const mode of ['pvp', 'cheese', 'disco', 'hydra']) {
+    for (const mode of ['pvp', 'cheese', 'disco', 'hydra', 'tunnels']) {
       const fighters = padFighters(padOccupants(modePads(mode)));
       if (fighters.length >= 2) {   // a lone Say Cheese player starts with the "Play now" button instead
         game.phase = 'countdown';
@@ -333,12 +336,14 @@ function tickGame() {
       game.fighters = [];
       announce('Countdown cancelled — at least 2 players must stay on the pads', 2500);
     } else if (t >= game.phaseEndsAt) {
-      if (game.mode === 'cheese') startCheese(); else if (game.mode === 'disco') startDisco(); else if (game.mode === 'hydra') startHydra(); else startFight();
+      if (game.mode === 'cheese') startCheese(); else if (game.mode === 'disco') startDisco(); else if (game.mode === 'hydra') startHydra(); else if (game.mode === 'tunnels') startTunnels(); else startFight();
     }
   } else if (game.phase === 'disco') {
     tickDisco(t);
   } else if (game.phase === 'hydra') {
     tickHydra(t);
+  } else if (game.phase === 'tunnels') {
+    tickTunnels(t);
   } else if (game.phase === 'cheese') {
     tickCheese(t);
   } else if (game.phase === 'fight') {
@@ -422,6 +427,54 @@ function endDisco(boom, reason) {
   game.phaseEndsAt = now() + 10000;
   broadcast({ t: 'over', mode: 'disco', boom, reason, name: boom ? 'EVERYONE' : (standings[0]?.[1] ?? 'Nobody'), standings });
   if (disco) disco.stage = 'done';
+}
+
+// ---------- Steam Tunnels ----------
+// A race through a maze of wireframe steam tunnels under UVA. Everyone climbs down the same ladder;
+// the first one to find the painting hidden at the farthest dead end wins.
+let tunnels = null;
+function startTunnels() {
+  game.phase = 'tunnels';
+  const seed = (Math.random() * 2 ** 31) | 0;
+  const maze = makeMaze(seed);
+  tunnels = { seed, maze, rects: walkRects(maze), startedAt: now(), endsAt: now() + TUNNELS.timeLimitMs, runners: [...game.fighters] };
+  tunnels.runners.forEach((id, k) => {
+    const pl = players.get(id);
+    if (!pl) return;
+    pl.inTunnel = true;
+    pl.moveBudget = 6; pl.budgetAt = now();
+    pl.lockUntil = 0;
+    pl.weapon = null;
+    pl.p = [maze.start.x + (k % 2 ? 0.5 : -0.5) * (k > 1 ? 1 : 0.6), 0, maze.start.z];
+    pl.yaw = maze.start.yaw;
+    send(pl.ws, { t: 'tunnelStart', seed, p: pl.p, yaw: pl.yaw });
+  });
+  announce('🔦 STEAM TUNNELS! Find the painting hidden somewhere under UVA', 3500);
+}
+function tickTunnels(t) {
+  if (!tunnels) return;
+  if (!tunnels.runners.some(id => players.has(id))) return endTunnels(null, 'Everyone left the tunnels');
+  if (t >= tunnels.endsAt) endTunnels(null, 'Time\'s up — nobody found the painting!');
+}
+function endTunnels(winnerId, reason) {
+  const w = players.get(winnerId);
+  game.phase = 'over';
+  game.winner = winnerId;
+  game.phaseEndsAt = now() + 9000;
+  broadcast({ t: 'over', mode: 'tunnels', winner: winnerId, name: w ? w.name : 'NOBODY', reason, secs: tunnels ? Math.round((now() - tunnels.startedAt) / 1000) : 0 });
+}
+// back up the ladder: runners come out next to the tunnel pads
+function exitTunnels() {
+  if (!tunnels) return;
+  tunnels.runners.forEach((id, k) => {
+    const pl = players.get(id);
+    if (!pl) return;
+    pl.inTunnel = false;
+    const pad = ARENA.tunnelPads[k % ARENA.tunnelPads.length];
+    pl.p = [pad.x + 3.2, 0, pad.z];
+    send(pl.ws, { t: 'tunnelExit', p: pl.p });
+  });
+  tunnels = null;
 }
 
 // ---------- Hydra Cubed ----------
@@ -1063,6 +1116,21 @@ wss.on('connection', (ws) => {
         if (!Array.isArray(msg.p) || msg.p.length !== 3 || !msg.p.every(Number.isFinite)) return;
         if (pl.hp <= 0 && game.phase === 'fight') return; // downed players stay put
         if (now() < pl.lockUntil) return;                // mid-berserk: server controls position
+        if (pl.inTunnel) {
+          // down in the steam tunnels: only places inside a tunnel count
+          // movement allowance refills at a fast run, so you can't teleport, but a laggy moment never gets you stuck
+          const tn = now(), step = Math.hypot(msg.p[0] - pl.p[0], msg.p[2] - pl.p[2]);
+          pl.moveBudget = Math.min(6, (pl.moveBudget ?? 6) + (tn - (pl.budgetAt ?? tn)) / 1000 * 12);
+          pl.budgetAt = tn;
+          if (tunnels && canStand(tunnels.rects, msg.p[0], msg.p[2], 0.05) && step <= pl.moveBudget) {
+            pl.moveBudget -= step;
+            pl.p = [msg.p[0], Math.max(0, Math.min(TUNNELS.height, msg.p[1])), msg.p[2]];
+          }
+          if (Number.isFinite(msg.yaw)) pl.yaw = msg.yaw;
+          if (Number.isFinite(msg.pitch)) pl.pitch = Math.max(-1.4, Math.min(1.4, msg.pitch));
+          pl.moving = !!msg.moving;
+          break;
+        }
         pl.p = [
           Math.max(-HALF, Math.min(HALF, msg.p[0])),
           Math.max(0, Math.min(ARENA.height - 2, msg.p[1])),
@@ -1088,7 +1156,7 @@ wss.on('connection', (ws) => {
       case 'soloStart': {
         // alone on the yellow (Say Cheese) or blue (Dance Dance Disco) pads: play with everyone on this camera
         if (game.phase !== 'lobby') break;
-        const mode = ['disco', 'hydra'].includes(msg.mode) ? msg.mode : 'cheese';
+        const mode = ['disco', 'hydra', 'tunnels'].includes(msg.mode) ? msg.mode : 'cheese';
         const mine = padFighters(padOccupants(modePads(mode)));
         if (mine.length === 1 && mine[0] === pl.id) {
           game.phase = 'countdown'; game.mode = mode; game.solo = true;
@@ -1152,6 +1220,13 @@ wss.on('connection', (ws) => {
       }
       case 'hydraShield': if (hydra) hydraShield(pl); break;
       case 'hydraSwing': if (hydra) hydraSwing(pl); break;
+      case 'tunnelFound': {
+        // the server checks you're really standing at the painting
+        if (game.phase !== 'tunnels' || !tunnels || !pl.inTunnel) break;
+        const P = tunnels.maze.painting;
+        if (Math.hypot(pl.p[0] - P.x, pl.p[2] - P.z) <= TUNNELS.findDist + 1) endTunnels(pl.id, `${pl.name} found the hidden painting!`);
+        break;
+      }
       case 'hydraDebugSkip': {
         // testing only: jump straight to the end of the hydra
         if (!process.env.DEBUG_SPAWN || !hydra || hydra.stage !== 'monsters') break;
@@ -1284,6 +1359,7 @@ setInterval(() => {
     fighters: game.fighters,
     pads: padOccupants().map(o => o.length > 0),
     mode: game.mode,
+    tunnels: tunnels && game.phase !== 'lobby' ? { seed: tunnels.seed, left: Math.max(0, tunnels.endsAt - t), runners: tunnels.runners } : null,
     hydra: hydra && game.phase !== 'lobby' ? {
       stage: hydra.stage,
       monster: hydra.monster ? {

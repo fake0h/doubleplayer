@@ -8,11 +8,12 @@ Everyone who opens the site appears as a glowing wireframe body in a big neon ro
 - **Say Cheese** (northeast corner, yellow pads, big smiley face): a face-making game played with your camera. See below.
 - **Dance Dance Disco** (middle of the east wall, blue pads, next to the Say Cheese smiley): dance together for your cameras until the dance floor explodes. See below.
 - **Hydra Cubed** (southeast corner, crimson pads, next to Dance Dance Disco, under a 2D three-headed hydra): fight three monsters with your camera, a shield and a sword. See below.
-- **Gray pads** (across the room on the west wall, in the middle and the southwest corner): not used yet.
+- **Steam Tunnels** (middle of the west wall, orange pads, under a sign of a tunnel disappearing into the dark): a first-person race through a maze of steam tunnels under UVA to find a hidden painting. See below.
+- **Gray pads** (southwest corner): not used yet.
 
-**Alone on a pad?** A panel pops up with **📣 Invite everyone** (key **I**): every other player in the arena gets a popup with a **Join** button (key **J**) that drops them onto a free pad. **🔗 Copy link** (key **L**) copies the game's address to send to friends who aren't on the site yet. On the Say Cheese and Disco pads there's also **▶ Play now** (key **P**) to start a game with everyone in front of your camera. On the Hydra Cubed pads it's **▶ Fight the monsters alone**.
+**Alone on a pad?** A panel pops up with **📣 Invite everyone** (key **I**): every other player in the arena gets a popup with a **Join** button (key **J**) that drops them onto a free pad. **🔗 Copy link** (key **L**) copies the game's address to send to friends who aren't on the site yet. On the Say Cheese and Disco pads there's also **▶ Play now** (key **P**) to start a game with everyone in front of your camera. On the Hydra Cubed pads it's **▶ Fight the monsters alone**, and on the Steam Tunnels pads **▶ Explore alone**.
 
-**Lobby vs. game:** the pressure pads and corner signs only show in the lobby (and during the 3-second countdown, so people can still hop on). Once a game starts they disappear, and the glowing outline of the room turns red for 4xPVP, yellow for Say Cheese, or crimson for Hydra Cubed.
+**Lobby vs. game:** the pressure pads and corner signs only show in the lobby (and during the 3-second countdown, so people can still hop on). Once a game starts they disappear, and the glowing outline of the room turns red for 4xPVP, yellow for Say Cheese, crimson for Hydra Cubed, or orange for Steam Tunnels.
 
 The 4xPVP corner has **four pressure pads**. When 2 or more players stand on them, a **3, 2, 1** countdown starts, and anyone who hops on a free pad before it ends joins in. Then weapons rain down from the ceiling and it's a free-for-all. Knocked-out players lie down and watch, and the **last one standing wins**.
 
@@ -89,6 +90,19 @@ The HUD tells you what to do (e.g. **🛡️ SHIELD UP + LEAN RIGHT!** when you'
 **After the hydra:** if 2 or more players are still alive, they turn to face each other in a circle and fight. Your swing hits the rival you lean toward (or the nearest one), and a raised shield blocks it. **Last one standing wins.** Alone, you win by slaying the hydra. If everyone falls, the monsters win.
 
 Body tracking uses Google's MediaPipe body tracker in your own browser, and the video never leaves your device. Settings (timings, hit points) are in `shared/hydra.js`. Add `?fakeface=1` to the address to try it with a simulated body (use the keys to fight).
+
+## Steam Tunnels
+
+**1 to 4 players** stand on the orange pads (or press **Explore alone**). Everyone climbs down a ladder into the steam tunnels underneath UVA. It's a race: **the first player to find the painting hidden in the maze wins.**
+
+- **First person**, with the usual controls: **WASD** or arrow keys to walk, **mouse** to look, **Shift** (or hold right click) to run, **Space** to jump. On a touchscreen: the stick to walk (push all the way to run), drag to look, and the jump button.
+- The tunnels are **3D wireframes**: taller than wide (8 ft wide, 12 ft tall), with ribbed concrete walls, caged lamps, a few leaky pipes puffing steam, and **copper and steel pipes running along one side**.
+- The maze is a grid of tunnels, and every straight run is **50 to 200 feet** long (about 1,000 ft across). A new maze is made every game, and everyone in the race gets the same one.
+- The **painting** (a sunset over a domed rotunda in a gleaming gold frame) hangs at the end of the dead end farthest from the ladder. Walk up to it to win.
+- You can see the other racers in the tunnels, but only when they're actually in view (no name tags through walls).
+- There's an **8-minute** limit. Afterwards everyone climbs back up next to the orange pads.
+
+Settings (sizes, speeds, time limit) are in `shared/tunnels.js`. The server checks that you really walked to the painting through the tunnels.
 
 ## Weapon wall
 
@@ -212,6 +226,7 @@ The game needs a Node server for WebSockets, so a static host like GitHub Pages 
 
 - `server.js`: serves the page and runs the game over WebSockets. It decides pad presses, the countdown, weapon drops, pickups, hits, and health, so players can't cheat their own health.
 - `shared/weapons.js`: weapon stats and arena layout, shared by server and client.
+- `shared/tunnels.js` / `public/js/tunnels.js`: the Steam Tunnels maze generator and the wireframe tunnels, pipes and painting.
 - `shared/hydra.js` / `public/js/hydra.js`: Hydra Cubed settings, monsters, armor/shield/sword, and the camera controls.
 - `public/js/main.js`: Three.js scene, controls, networking, effects, HUD.
 - `public/js/body.js`: the wireframe body with capsule-shaped limbs and walk/attack animation.

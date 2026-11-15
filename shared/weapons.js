@@ -144,9 +144,12 @@ export const ARENA = {
   hydraPads: [
     { x: 24.5, z: 17.5, r: 2.2 }, { x: 17.5, z: 17.5, r: 2.2 }, { x: 24.5, z: 24.5, r: 2.2 }, { x: 17.5, z: 24.5, r: 2.2 },
   ],
-  // Gray, unused for now: across the room on the west wall (middle + southwest corner)
-  grayPads: [
+  // Steam Tunnels (middle of the west wall, orange)
+  tunnelPads: [
     { x: -24.5, z: -3.5, r: 2.2 }, { x: -17.5, z: -3.5, r: 2.2 }, { x: -24.5, z: 3.5, r: 2.2 }, { x: -17.5, z: 3.5, r: 2.2 },
+  ],
+  // Gray, unused for now: southwest corner
+  grayPads: [
     { x: -24.5, z: 17.5, r: 2.2 }, { x: -17.5, z: 17.5, r: 2.2 }, { x: -24.5, z: 24.5, r: 2.2 }, { x: -17.5, z: 24.5, r: 2.2 },
   ],
   // Say Cheese (northeast corner, yellow)
@@ -189,7 +192,7 @@ export const ARENA = {
 
 // Where a roaming jump pad is at time t (seconds). They circle the outer part of the
 // arena on wobbly paths, staying clear of the pressure pads in the middle.
-export const allPadSets = () => [ARENA.pads, ARENA.cheesePads, ARENA.nextPads, ARENA.hydraPads, ARENA.grayPads];
+export const allPadSets = () => [ARENA.pads, ARENA.cheesePads, ARENA.nextPads, ARENA.hydraPads, ARENA.tunnelPads, ARENA.grayPads];
 export function jumpPadPos(i, t) {
   const sp = ARENA.jumpPadMoveSpeed;
   const a = t * sp * (i % 2 === 0 ? 1 : -1.3) + i * Math.PI / 2 + Math.PI / 4;

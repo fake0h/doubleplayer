@@ -218,6 +218,11 @@
   #hydraAsk h2 { color: #00ffc8; margin: 0 0 10px; font-size: 32px; }
   #hydraAsk button { margin: 6px; padding: 12px 18px; font-size: 18px; border-radius: 10px; border: 2px solid #00ffc8; background: #032; color: #fff; cursor: pointer; }
   #hydraAskMsg { margin-top: 8px; color: #ffd400; min-height: 1em; }
+  #tunnelHud { position: fixed; inset: 0; pointer-events: none; display: none; z-index: 6; }
+  #tunnelTop { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); font: 900 26px system-ui, sans-serif; color: #ff8a1e; text-shadow: 0 0 12px #000; white-space: nowrap; }
+  #tunnelTime { margin-left: 16px; color: #fff; font-variant-numeric: tabular-nums; }
+  #tunnelTip { position: absolute; top: 54px; left: 50%; transform: translateX(-50%); font: 700 15px system-ui, sans-serif; color: #d8ecff; background: rgba(0,0,0,0.45); padding: 5px 12px; border-radius: 8px; white-space: nowrap; }
+  #tunnelTip.found { color: #ffc23c; font-size: 22px; }
   #padPanel { position: fixed; left: 50%; top: 110px; transform: translateX(-50%); display: none; z-index: 7; text-align: center; pointer-events: auto; }
   #padPanel .title { font-weight: 800; margin-bottom: 8px; }
   #padPanel button, #inviteToast button { font: 800 16px system-ui, sans-serif; border: 0; border-radius: 8px; padding: 10px 16px; margin: 3px; cursor: pointer; touch-action: manipulation; }
@@ -357,6 +362,10 @@
     <button data-act="left">◀</button><button data-act="back">▼</button><button data-act="right">▶</button>
     <button data-act="shield" class="big">🛡️</button><button data-act="swing" class="big">⚔️</button>
   </div>
+</div>
+<div id="tunnelHud">
+  <div id="tunnelTop"><span id="tunnelTitle">🔦 STEAM TUNNELS</span><span id="tunnelTime"></span></div>
+  <div id="tunnelTip">Find the painting hidden somewhere in the tunnels!</div>
 </div>
 <div id="hydraAsk">
   <div class="box panel">
